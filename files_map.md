@@ -20,6 +20,12 @@ Description: Setup instructions, prerequisites, and usage guide.
 ### SECURITY.md
 Description: Security and data-handling notes, including privacy defaults for metrics logging.
 
+### docs/files_map.md
+Description: File map for the docs directory.
+
+### docs/robustness_checklist.md
+Description: Manual reliability checklist covering core use-cases, edge cases, fault injection, and soak acceptance criteria.
+
 ### main.py
 Description: Entry point. Loads config, initializes all components, wires them into the state machine, handles shutdown.
 
@@ -80,6 +86,12 @@ Description: OpenRouter streaming HTTP client with SSE parsing, warmup, web sear
 ### llm/prompt.py
 Description: System prompt definition and message list builder.
 
+### scripts/files_map.md
+Description: File map for the scripts directory.
+
+### scripts/soak_test.py
+Description: Soak monitoring utility for long-run robustness checks using metrics JSONL and threshold-based pass/fail criteria.
+
 ### tts/__init__.py
 Description: TTSEngine protocol definition and create_tts() factory for selecting Piper or macOS say backend.
 
@@ -106,6 +118,9 @@ Description: Tests for OpenRouter retry behavior on transient failures and no-re
 
 ### tests/test_audio_capture_drops.py
 Description: Tests for dropped-frame counters in audio capture under queue pressure.
+
+### tests/test_state_machine_flow.py
+Description: State-machine simulation tests for transition logic and injected STT/LLM/TTS failures.
 
 ### tests/files_map.md
 Description: File map for the tests directory.

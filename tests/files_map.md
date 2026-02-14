@@ -16,3 +16,6 @@ Description: Verifies retry behavior for transient LLM API failures and fail-fas
 
 ### test_audio_capture_drops.py
 Description: Verifies capture dropped-frame counter increment/reset behavior when queue is full.
+
+### test_state_machine_flow.py
+Description: Simulates state-machine transitions and fault-injection recovery for STT/LLM/TTS failures.

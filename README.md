@@ -62,3 +62,12 @@ Current development defaults keep full text logging on: `metrics.log_transcripts
 
 For safer handling in shared environments, set these keys to `false`.
 Those same flags also control whether transcript/response text is printed verbatim in the terminal.
+
+## Robustness Validation
+
+- Manual reliability checklist: `docs/robustness_checklist.md`
+- Soak monitor (30 min example):
+
+```bash
+python3 scripts/soak_test.py --duration-s 1800 --command "python3 main.py"
+```
