@@ -3,6 +3,8 @@
 import asyncio
 import json
 import sys
+import threading
+import time
 import types
 
 import numpy as np
@@ -64,6 +66,18 @@ class FakeTTS:
         else:
             audio = np.array([100, 200, 300], dtype=np.int16)
             yield audio, 22050, True
+
+
+class BlockingSecondChunkTTS:
+    def __init__(self):
+        self.first_chunk_ready = threading.Event()
+        self.release_second_chunk = threading.Event()
+
+    def synthesize_chunks(self, text, language=None):
+        self.first_chunk_ready.set()
+        yield np.array([100, 200, 300], dtype=np.int16), 22050, False
+        self.release_second_chunk.wait(timeout=1.0)
+        yield np.array([400, 500, 600], dtype=np.int16), 22050, True
 
 
 class FakeSession:
@@ -204,8 +218,6 @@ async def test_follow_up_timeout_clears_session():
     await handler.handle()
 
     assert session.clear_calls == 1
-    # Wait for the async task to complete
-    await asyncio.sleep(0.05)
     cleared_msgs = [m for m in ws.sent_text if '"session_cleared"' in m]
     assert len(cleared_msgs) == 1
 
@@ -279,6 +291,40 @@ async def test_stt_hallucination_sends_rejection():
 
 
 @pytest.mark.asyncio
+async def test_tts_streams_first_chunk_before_full_synthesis_finishes():
+    Handler = _import_handler()
+
+    audio = np.array([100, 200], dtype=np.int16)
+    tts = BlockingSecondChunkTTS()
+
+    ws = FakeWebSocket(incoming_messages=[
+        {
+            "type": "websocket.receive",
+            "text": protocol.make_utterance_meta(16000, len(audio)),
+        },
+        {"type": "websocket.receive", "bytes": audio.tobytes()},
+    ])
+
+    handler = Handler(
+        ws=ws, stt=FakeSTT(), llm=FakeLLM(), tts=tts,
+        session=FakeSession(), metrics=FakeMetrics(), config=_base_config(),
+    )
+
+    handle_task = asyncio.create_task(handler.handle())
+    first_chunk_started = await asyncio.to_thread(tts.first_chunk_ready.wait, 1.0)
+    assert first_chunk_started
+
+    await asyncio.sleep(0.05)
+    # First chunk should already be streamed while second chunk is still blocked.
+    assert len(ws.sent_bytes) >= 1
+
+    tts.release_second_chunk.set()
+    await handle_task
+    if handler._pipeline_task:
+        await handler._pipeline_task
+
+
+@pytest.mark.asyncio
 async def test_barge_in_cancels_tts():
     Handler = _import_handler()
 
@@ -317,6 +363,97 @@ async def test_barge_in_cancels_tts():
 
 
 @pytest.mark.asyncio
+async def test_barge_in_interrupts_blocked_tts_promptly():
+    Handler = _import_handler()
+
+    audio = np.array([100, 200], dtype=np.int16)
+    tts = BlockingSecondChunkTTS()
+    ws = FakeWebSocket(incoming_messages=[
+        {
+            "type": "websocket.receive",
+            "text": protocol.make_utterance_meta(16000, len(audio)),
+        },
+        {"type": "websocket.receive", "bytes": audio.tobytes()},
+        {"type": "websocket.receive", "text": protocol.make_barge_in()},
+    ])
+
+    handler = Handler(
+        ws=ws, stt=FakeSTT(), llm=FakeLLM(), tts=tts,
+        session=FakeSession(), metrics=FakeMetrics(), config=_base_config(),
+    )
+
+    t0 = time.monotonic()
+    await handler.handle()
+    if handler._pipeline_task:
+        await handler._pipeline_task
+    elapsed = time.monotonic() - t0
+    tts.release_second_chunk.set()
+
+    payloads = [json.loads(m) for m in ws.sent_text]
+    done_msgs = [p for p in payloads if p.get("type") == "tts_done"]
+    assert done_msgs
+    assert done_msgs[-1]["cancelled"] is True
+    assert elapsed < 0.8
+
+
+@pytest.mark.asyncio
+async def test_large_audio_metadata_mismatch_is_rejected():
+    Handler = _import_handler()
+
+    audio = np.array([100, 200], dtype=np.int16)
+    ws = FakeWebSocket(incoming_messages=[
+        {
+            "type": "websocket.receive",
+            "text": protocol.make_utterance_meta(16000, 1000),
+        },
+        {"type": "websocket.receive", "bytes": audio.tobytes()},
+    ])
+
+    handler = Handler(
+        ws=ws, stt=FakeSTT(), llm=FakeLLM(), tts=FakeTTS(),
+        session=FakeSession(), metrics=FakeMetrics(), config=_base_config(),
+    )
+    await handler.handle()
+
+    payloads = [json.loads(m) for m in ws.sent_text]
+    error_payloads = [p for p in payloads if p.get("type") == "error"]
+    assert error_payloads
+    assert error_payloads[-1]["code"] == "protocol_audio_size_mismatch"
+    assert handler._pipeline_task is None
+    assert any(name == "protocol_audio_mismatch_rejected" for name, _ in handler._metrics.events)
+
+
+@pytest.mark.asyncio
+async def test_small_audio_metadata_mismatch_is_accepted():
+    Handler = _import_handler()
+
+    cfg = _base_config()
+    cfg["protocol"] = {"audio_mismatch_reject_ratio": 0.5}
+
+    audio = np.array([100, 200], dtype=np.int16)
+    ws = FakeWebSocket(incoming_messages=[
+        {
+            "type": "websocket.receive",
+            "text": protocol.make_utterance_meta(16000, 3),
+        },
+        {"type": "websocket.receive", "bytes": audio.tobytes()},
+    ])
+
+    handler = Handler(
+        ws=ws, stt=FakeSTT(), llm=FakeLLM(), tts=FakeTTS(),
+        session=FakeSession(), metrics=FakeMetrics(), config=cfg,
+    )
+    await handler.handle()
+
+    if handler._pipeline_task:
+        await handler._pipeline_task
+
+    payloads = [json.loads(m) for m in ws.sent_text]
+    assert any(p.get("type") == "tts_done" for p in payloads)
+    assert any(name == "protocol_audio_mismatch_small" for name, _ in handler._metrics.events)
+
+
+@pytest.mark.asyncio
 async def test_pipeline_error_sends_error_message():
     Handler = _import_handler()
 
@@ -340,5 +477,11 @@ async def test_pipeline_error_sends_error_message():
     if handler._pipeline_task:
         await handler._pipeline_task
 
-    types_sent = [json.loads(m).get("type") for m in ws.sent_text]
-    assert "error" in types_sent
+    payloads = [json.loads(m) for m in ws.sent_text]
+    error_payloads = [p for p in payloads if p.get("type") == "error"]
+    assert error_payloads
+    err = error_payloads[-1]
+    assert err["stage"] == "stt"
+    assert err["code"] == "pipeline_stt_failed"
+    assert "model crashed" not in err["message"].lower()
+    assert any(name == "pipeline_error_code" for name, _ in handler._metrics.events)

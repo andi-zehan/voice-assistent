@@ -64,7 +64,13 @@ def main():
     vad = VoiceActivityDetector(config["vad"], config["audio"]["sample_rate"])
     utterance_detector = UtteranceDetector(config["vad"])
     wake_detector = WakeWordDetector(config["wake"])
-    connection = ServerConnection(server_url)
+    connection = ServerConnection(
+        server_url,
+        reconnect_min_s=server_cfg.get("reconnect_min_s", 1.0),
+        reconnect_max_s=server_cfg.get("reconnect_max_s", 30.0),
+        offline_send_buffer_size=server_cfg.get("offline_send_buffer_size", 200),
+        offline_send_ttl_s=server_cfg.get("offline_send_ttl_s", 5.0),
+    )
     chunk_player = ChunkPlayer(player)
 
     machine = ClientStateMachine(

@@ -6,6 +6,8 @@ barge-in cancellation via an asyncio.Event.
 
 import asyncio
 import logging
+import queue
+import threading
 import time
 import traceback
 
@@ -28,6 +30,12 @@ log = logging.getLogger(__name__)
 _ERROR_MESSAGES: dict[str, str] = {
     "en": "Sorry, something went wrong.",
     "de": "Entschuldigung, da ist etwas schiefgelaufen.",
+}
+
+_PIPELINE_ERROR_CODES: dict[str, str] = {
+    "stt": "pipeline_stt_failed",
+    "llm": "pipeline_llm_failed",
+    "tts": "pipeline_tts_failed",
 }
 
 
@@ -57,6 +65,13 @@ class SessionHandler:
         metrics_cfg = config.get("metrics", {})
         self._log_transcripts = metrics_cfg.get("log_transcripts", False)
         self._log_llm_text = metrics_cfg.get("log_llm_text", False)
+
+        protocol_cfg = config.get("protocol", {})
+        try:
+            mismatch_reject_ratio = float(protocol_cfg.get("audio_mismatch_reject_ratio", 0.2))
+        except (TypeError, ValueError):
+            mismatch_reject_ratio = 0.2
+        self._audio_mismatch_reject_ratio = min(max(mismatch_reject_ratio, 0.0), 1.0)
 
     async def handle(self) -> None:
         """Main receive loop — dispatches messages and runs pipeline."""
@@ -97,7 +112,7 @@ class SessionHandler:
         elif msg_type == protocol.BARGE_IN:
             self._on_barge_in()
         elif msg_type == protocol.FOLLOW_UP_TIMEOUT:
-            self._on_follow_up_timeout()
+            await self._on_follow_up_timeout()
         else:
             log.warning("Unknown message type: %s", msg_type)
 
@@ -113,22 +128,77 @@ class SessionHandler:
 
     async def _on_utterance_audio(self, meta: dict) -> None:
         """Receive utterance audio (meta JSON + following binary frame)."""
-        sample_rate = meta.get("sample_rate", 16000)
-        expected_samples = meta.get("samples", 0)
+        try:
+            sample_rate = int(meta.get("sample_rate", 16000))
+            expected_samples = int(meta.get("samples", 0))
+        except (TypeError, ValueError):
+            self._metrics.log("protocol_invalid_audio_meta")
+            await self._ws.send_text(
+                protocol.make_error(
+                    "Invalid audio metadata.",
+                    stage="protocol",
+                    code="protocol_invalid_audio_meta",
+                )
+            )
+            return
+
+        if sample_rate <= 0 or expected_samples < 0:
+            self._metrics.log("protocol_invalid_audio_meta", sample_rate=sample_rate, samples=expected_samples)
+            await self._ws.send_text(
+                protocol.make_error(
+                    "Invalid audio metadata.",
+                    stage="protocol",
+                    code="protocol_invalid_audio_meta",
+                )
+            )
+            return
 
         # Next frame should be the binary audio data
         binary_msg = await self._ws.receive()
         if binary_msg["type"] != "websocket.receive" or "bytes" not in binary_msg:
             await self._ws.send_text(
-                protocol.make_error("Expected binary audio frame after utterance_audio meta", "stt")
+                protocol.make_error(
+                    "Expected binary audio frame after utterance metadata.",
+                    stage="protocol",
+                    code="protocol_expected_audio_binary",
+                )
             )
             return
 
         audio_bytes = binary_msg["bytes"]
         audio_int16 = protocol.decode_audio(audio_bytes)
+        actual_samples = len(audio_int16)
+
+        if actual_samples != expected_samples:
+            mismatch_ratio = abs(actual_samples - expected_samples) / max(actual_samples, expected_samples, 1)
+            payload = {
+                "expected_samples": expected_samples,
+                "actual_samples": actual_samples,
+                "mismatch_ratio": round(mismatch_ratio, 4),
+            }
+            if mismatch_ratio > self._audio_mismatch_reject_ratio:
+                log.warning(
+                    "Rejecting audio payload mismatch: expected=%d actual=%d ratio=%.3f",
+                    expected_samples, actual_samples, mismatch_ratio,
+                )
+                self._metrics.log("protocol_audio_mismatch_rejected", **payload)
+                await self._ws.send_text(
+                    protocol.make_error(
+                        "Audio payload did not match metadata.",
+                        stage="protocol",
+                        code="protocol_audio_size_mismatch",
+                    )
+                )
+                return
+
+            log.warning(
+                "Accepting minor audio payload mismatch: expected=%d actual=%d ratio=%.3f",
+                expected_samples, actual_samples, mismatch_ratio,
+            )
+            self._metrics.log("protocol_audio_mismatch_small", **payload)
 
         log.info("Received utterance: %d samples (expected %d) at %d Hz",
-                 len(audio_int16), expected_samples, sample_rate)
+                 actual_samples, expected_samples, sample_rate)
 
         # Cancel any existing pipeline
         if self._pipeline_task and not self._pipeline_task.done():
@@ -151,18 +221,84 @@ class SessionHandler:
         self._metrics.log("barge_in")
         self._cancel_event.set()
 
-    def _on_follow_up_timeout(self) -> None:
+    async def _on_follow_up_timeout(self) -> None:
         """Handle follow-up timeout — clear session."""
         log.info("Follow-up timeout, clearing session")
         self._session.clear()
-        asyncio.create_task(
-            self._ws.send_text(protocol.make_session_cleared())
-        )
+        await self._ws.send_text(protocol.make_session_cleared())
+
+    async def _stream_tts_incremental(
+        self,
+        text: str,
+        language: str,
+    ) -> tuple[int, bool]:
+        """Incrementally stream TTS chunks while allowing mid-stream cancel."""
+        stream_queue: queue.Queue = queue.Queue()
+        stream_done = object()
+        stop_requested = threading.Event()
+
+        def _producer() -> None:
+            try:
+                for chunk in self._tts.synthesize_chunks(text, language=language):
+                    if stop_requested.is_set() or self._cancel_event.is_set():
+                        break
+                    stream_queue.put(chunk)
+            except Exception as exc:
+                stream_queue.put(exc)
+            finally:
+                stream_queue.put(stream_done)
+
+        producer_thread = threading.Thread(target=_producer, daemon=True)
+        producer_thread.start()
+
+        cancelled = False
+        chunk_index = 0
+
+        while True:
+            if self._cancel_event.is_set():
+                cancelled = True
+                stop_requested.set()
+                break
+
+            try:
+                item = await asyncio.to_thread(stream_queue.get, True, 0.1)
+            except queue.Empty:
+                continue
+            if item is stream_done:
+                break
+            if isinstance(item, Exception):
+                raise item
+
+            audio_int16_chunk, sr, is_last = item
+            if self._cancel_event.is_set():
+                cancelled = True
+                stop_requested.set()
+                break
+
+            if len(audio_int16_chunk) == 0:
+                continue
+
+            await self._ws.send_text(protocol.make_tts_audio_meta(
+                sample_rate=sr,
+                num_samples=len(audio_int16_chunk),
+                chunk_index=chunk_index,
+                is_last=is_last,
+            ))
+            await self._ws.send_bytes(protocol.encode_audio(audio_int16_chunk))
+            chunk_index += 1
+
+        stop_requested.set()
+        await asyncio.to_thread(producer_thread.join, 0.05)
+        if producer_thread.is_alive():
+            log.warning("TTS producer thread still running after cancellation window")
+
+        return chunk_index, cancelled
 
     async def _run_pipeline(self, audio_int16: np.ndarray, sample_rate: int) -> None:
         """Run the full STT → LLM → TTS pipeline."""
         interaction_start = time.monotonic()
         detected_lang: str | None = None
+        pipeline_stage = "stt"
 
         try:
             # ── STT ─────────────────────────────────────────────
@@ -210,6 +346,7 @@ class SessionHandler:
                 return
 
             # ── LLM ─────────────────────────────────────────────
+            pipeline_stage = "llm"
             await self._ws.send_text(protocol.make_status(protocol.STAGE_LLM_START))
 
             self._session.add_user_message(transcript)
@@ -255,31 +392,13 @@ class SessionHandler:
             )
 
             # ── TTS — stream per-sentence chunks ────────────────
+            pipeline_stage = "tts"
             await self._ws.send_text(protocol.make_status(protocol.STAGE_TTS_START))
 
             tts_start = time.monotonic()
-            cancelled = False
-
-            chunk_index = 0
-            for audio_int16_chunk, sr, is_last in await asyncio.to_thread(
-                lambda: list(self._tts.synthesize_chunks(response_text, language=response_lang))
-            ):
-                if self._cancel_event.is_set():
-                    cancelled = True
-                    break
-
-                if len(audio_int16_chunk) == 0:
-                    continue
-
-                # Send meta + binary
-                await self._ws.send_text(protocol.make_tts_audio_meta(
-                    sample_rate=sr,
-                    num_samples=len(audio_int16_chunk),
-                    chunk_index=chunk_index,
-                    is_last=is_last,
-                ))
-                await self._ws.send_bytes(protocol.encode_audio(audio_int16_chunk))
-                chunk_index += 1
+            chunk_index, cancelled = await self._stream_tts_incremental(
+                response_text, language=response_lang
+            )
 
             tts_elapsed = time.monotonic() - tts_start
             log.info("TTS: %d chunks in %.2fs (input=%s, voice=%s, cancelled=%s)",
@@ -314,14 +433,20 @@ class SessionHandler:
             raise
         except Exception as e:
             log.error("Pipeline error: %s\n%s", e, traceback.format_exc())
-            self._metrics.log("pipeline_error", error=str(e))
+            error_code = _PIPELINE_ERROR_CODES.get(pipeline_stage, "pipeline_internal_error")
+            self._metrics.log("pipeline_error", code=error_code, stage=pipeline_stage)
+            self._metrics.log("pipeline_error_code", code=error_code, stage=pipeline_stage)
             try:
-                await self._ws.send_text(
-                    protocol.make_error(str(e), stage="pipeline")
-                )
-                # Try to speak error message
                 err_lang = detected_lang or "en"
                 err_msg = _ERROR_MESSAGES.get(err_lang, _ERROR_MESSAGES["en"])
+                await self._ws.send_text(
+                    protocol.make_error(
+                        err_msg,
+                        stage=pipeline_stage,
+                        code=error_code,
+                    )
+                )
+                # Try to speak error message
                 for audio_chunk, sr, is_last in self._tts.synthesize_chunks(err_msg, language=err_lang):
                     if len(audio_chunk) == 0:
                         continue

@@ -6,7 +6,7 @@ Incoming messages are pushed to a thread-safe queue for the main
 """
 
 import asyncio
-import json
+from collections import deque
 import logging
 import queue
 import threading
@@ -32,10 +32,31 @@ class ServerConnection:
     - ``recv_queue`` provides incoming parsed messages
     """
 
-    def __init__(self, server_url: str, reconnect_min_s: float = 1.0, reconnect_max_s: float = 30.0):
+    def __init__(
+        self,
+        server_url: str,
+        reconnect_min_s: float = 1.0,
+        reconnect_max_s: float = 30.0,
+        offline_send_buffer_size: int = 200,
+        offline_send_ttl_s: float = 5.0,
+    ):
         self._server_url = server_url
         self._reconnect_min_s = reconnect_min_s
         self._reconnect_max_s = reconnect_max_s
+
+        try:
+            parsed_buffer_size = int(offline_send_buffer_size)
+        except (TypeError, ValueError):
+            parsed_buffer_size = 200
+        try:
+            parsed_ttl_s = float(offline_send_ttl_s)
+        except (TypeError, ValueError):
+            parsed_ttl_s = 5.0
+
+        self._offline_send_buffer_size = max(1, parsed_buffer_size)
+        self._offline_send_ttl_s = max(0.1, parsed_ttl_s)
+        self._offline_send_buffer: deque[tuple[float, str | bytes]] = deque()
+        self._offline_send_lock = threading.Lock()
 
         # Incoming messages from server (parsed dicts or (meta_dict, audio_ndarray) tuples)
         self.recv_queue: queue.Queue = queue.Queue(maxsize=500)
@@ -62,6 +83,7 @@ class ServerConnection:
     def stop(self) -> None:
         """Stop the background thread and close connection."""
         self._running = False
+        self._connected.clear()
         if self._loop:
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread:
@@ -91,8 +113,60 @@ class ServerConnection:
 
     def _enqueue_send(self, data: str | bytes) -> None:
         """Thread-safe enqueue for the async send loop."""
-        if self._loop and self._send_queue:
-            self._loop.call_soon_threadsafe(self._send_queue.put_nowait, data)
+        if self._loop and self._send_queue and self._connected.is_set():
+            try:
+                self._loop.call_soon_threadsafe(self._send_queue.put_nowait, data)
+                return
+            except RuntimeError:
+                # Event loop is shutting down; fall through to buffer.
+                pass
+
+        self._buffer_offline_send(data)
+
+    def _drop_expired_offline_messages_locked(self, now_s: float) -> int:
+        dropped = 0
+        while self._offline_send_buffer:
+            created_s = self._offline_send_buffer[0][0]
+            if now_s - created_s <= self._offline_send_ttl_s:
+                break
+            self._offline_send_buffer.popleft()
+            dropped += 1
+        return dropped
+
+    def _buffer_offline_send(self, data: str | bytes) -> None:
+        now_s = time.monotonic()
+        with self._offline_send_lock:
+            dropped_expired = self._drop_expired_offline_messages_locked(now_s)
+            if dropped_expired > 0:
+                log.warning("Dropped %d expired outbound buffered messages", dropped_expired)
+
+            if len(self._offline_send_buffer) >= self._offline_send_buffer_size:
+                self._offline_send_buffer.popleft()
+                log.warning("Offline send buffer full, dropping oldest outbound message")
+
+            self._offline_send_buffer.append((now_s, data))
+
+    def _drain_offline_send_buffer(self) -> None:
+        if self._send_queue is None:
+            return
+
+        now_s = time.monotonic()
+        buffered_data: list[str | bytes] = []
+
+        with self._offline_send_lock:
+            dropped_expired = self._drop_expired_offline_messages_locked(now_s)
+            if dropped_expired > 0:
+                log.warning("Dropped %d expired outbound buffered messages", dropped_expired)
+
+            while self._offline_send_buffer:
+                _, data = self._offline_send_buffer.popleft()
+                buffered_data.append(data)
+
+        for data in buffered_data:
+            self._send_queue.put_nowait(data)
+
+        if buffered_data:
+            log.info("Flushed %d buffered outbound messages after reconnect", len(buffered_data))
 
     # ── Background asyncio loop ─────────────────────────────────
 
@@ -120,6 +194,7 @@ class ServerConnection:
                     self._connected.set()
                     backoff = self._reconnect_min_s
                     log.info("Connected to server")
+                    self._drain_offline_send_buffer()
 
                     # Run send and receive concurrently
                     await asyncio.gather(

@@ -1,6 +1,10 @@
 server:
   host: "localhost"       # Server hostname or IP
   port: 8765              # Server WebSocket port
+  reconnect_min_s: 1.0
+  reconnect_max_s: 30.0
+  offline_send_buffer_size: 200
+  offline_send_ttl_s: 5.0
 
 audio:
   sample_rate: 16000

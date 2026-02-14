@@ -101,15 +101,23 @@ def test_make_session_cleared():
 
 
 def test_make_error():
-    msg = json.loads(protocol.make_error("STT failed", stage="stt"))
+    msg = json.loads(protocol.make_error("STT failed", stage="stt", code="pipeline_stt_failed"))
     assert msg["type"] == "error"
     assert msg["message"] == "STT failed"
     assert msg["stage"] == "stt"
+    assert msg["code"] == "pipeline_stt_failed"
 
 
 def test_make_error_no_stage():
     msg = json.loads(protocol.make_error("unknown error"))
     assert msg["type"] == "error"
+    assert "stage" not in msg
+
+
+def test_make_error_with_code_only():
+    msg = json.loads(protocol.make_error("unknown error", code="internal_error"))
+    assert msg["type"] == "error"
+    assert msg["code"] == "internal_error"
     assert "stage" not in msg
 
 

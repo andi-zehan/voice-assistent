@@ -46,3 +46,6 @@ metrics:
   flush_interval: 10
   log_transcripts: true
   log_llm_text: true
+
+protocol:
+  audio_mismatch_reject_ratio: 0.2

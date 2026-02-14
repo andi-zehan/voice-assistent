@@ -55,6 +55,11 @@ class FakeSTT:
         }
 
 
+class FakeFailingSTT:
+    def transcribe(self, audio, sample_rate):
+        raise RuntimeError("simulated stt crash")
+
+
 class FakeLLM:
     def warmup(self):
         pass
@@ -236,3 +241,72 @@ async def test_session_persists_across_utterances():
     # Session should have messages from both interactions
     messages = session.get_messages()
     assert len(messages) >= 2  # At least user + assistant from first interaction
+
+
+@pytest.mark.asyncio
+async def test_large_audio_metadata_mismatch_returns_protocol_error_code():
+    audio = np.array([1, 2, 3], dtype=np.int16)
+
+    ws = CollectingWebSocket([
+        {"type": "websocket.receive", "text": protocol.make_utterance_meta(16000, 1200)},
+        {"type": "websocket.receive", "bytes": audio.tobytes()},
+    ])
+
+    config = {
+        "stt": {"no_speech_threshold": 0.85, "logprob_threshold": -1.5},
+        "conversation": {"max_turns": 10, "max_tokens_budget": 8000},
+        "metrics": {"log_transcripts": True, "log_llm_text": True},
+    }
+
+    handler = SessionHandler(
+        ws=ws,
+        stt=FakeSTT(),
+        llm=FakeLLM(),
+        tts=FakeTTS(),
+        session=Session(config["conversation"]),
+        metrics=MetricsLogger({"enabled": False}),
+        config=config,
+    )
+
+    await handler.handle()
+
+    payloads = [json.loads(m) for m in ws.sent_text]
+    errors = [p for p in payloads if p.get("type") == "error"]
+    assert errors
+    assert errors[-1]["code"] == "protocol_audio_size_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_failure_returns_sanitized_error_code():
+    audio = np.array([1, 2, 3], dtype=np.int16)
+
+    ws = CollectingWebSocket([
+        {"type": "websocket.receive", "text": protocol.make_utterance_meta(16000, len(audio))},
+        {"type": "websocket.receive", "bytes": audio.tobytes()},
+    ])
+
+    config = {
+        "stt": {"no_speech_threshold": 0.85, "logprob_threshold": -1.5},
+        "conversation": {"max_turns": 10, "max_tokens_budget": 8000},
+        "metrics": {"log_transcripts": True, "log_llm_text": True},
+    }
+
+    handler = SessionHandler(
+        ws=ws,
+        stt=FakeFailingSTT(),
+        llm=FakeLLM(),
+        tts=FakeTTS(),
+        session=Session(config["conversation"]),
+        metrics=MetricsLogger({"enabled": False}),
+        config=config,
+    )
+
+    await handler.handle()
+    if handler._pipeline_task:
+        await handler._pipeline_task
+
+    payloads = [json.loads(m) for m in ws.sent_text]
+    errors = [p for p in payloads if p.get("type") == "error"]
+    assert errors
+    assert errors[-1]["code"] == "pipeline_stt_failed"
+    assert "simulated stt crash" not in errors[-1]["message"].lower()

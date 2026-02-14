@@ -22,13 +22,13 @@ Description: Client entry point. Loads config, initializes audio/wake/VAD compon
 Description: Client-side 5-state FSM (PASSIVE -> LISTENING -> WAITING -> SPEAKING -> FOLLOW_UP). Handles wake word, VAD, earcons, barge-in. Delegates STT/LLM/TTS to server.
 
 ### client/connection.py
-Description: WebSocket client with auto-reconnect (exponential backoff). Background asyncio thread for send/receive, thread-safe queue for main loop.
+Description: WebSocket client with auto-reconnect (exponential backoff), bounded offline outbound buffering, TTL expiry, and reconnect flush.
 
 ### client/chunk_player.py
 Description: TTS chunk queue and sequential playback. Receives int16 PCM chunks from server, plays via AudioPlayer with barge-in cancellation support.
 
 ### client/config.yaml
-Description: Client configuration — server address, audio device, wake word, VAD, earcon, follow-up window settings.
+Description: Client configuration — server address, reconnect/buffering limits, audio device, wake word, VAD, earcon, and follow-up settings.
 
 ### client/audio/__init__.py
 Description: Package init for client audio module.
@@ -66,10 +66,10 @@ Description: Server entry point. Loads config, initializes STT/LLM/TTS, starts u
 Description: FastAPI application with /ws WebSocket endpoint. Initializes server components and creates per-connection SessionHandler.
 
 ### server/session_handler.py
-Description: Per-connection pipeline orchestration. Dispatches incoming messages, runs STT->LLM->TTS pipeline as asyncio task, handles barge-in cancellation.
+Description: Per-connection pipeline orchestration with protocol metadata validation, incremental TTS streaming, barge-in cancellation, and sanitized error responses.
 
 ### server/config.yaml
-Description: Server configuration — bind address, STT model, LLM model/API, TTS voices, conversation limits, metrics settings.
+Description: Server configuration — bind address, STT model, LLM model/API, TTS voices, conversation limits, metrics settings, and protocol mismatch thresholds.
 
 ### server/stt/__init__.py
 Description: Package init for server STT module.
@@ -119,13 +119,13 @@ Description: Tests for shared WebSocket protocol encode/decode, message construc
 Description: Client state machine tests — wake detection, listening timeouts, utterance sending, TTS playback, barge-in, follow-up transitions.
 
 ### tests/test_session_handler.py
-Description: Server session handler tests — wake/warmup, pipeline execution, hallucination rejection, barge-in cancellation, error handling.
+Description: Server session handler tests — wake/warmup, protocol metadata validation, incremental TTS streaming/cancellation, and sanitized error handling.
 
 ### tests/test_chunk_player.py
 Description: TTS chunk player tests — single/multi chunk playback, cancellation, empty chunk handling.
 
 ### tests/test_integration.py
-Description: End-to-end integration tests — full pipeline wake-to-TTS, barge-in, session persistence across utterances.
+Description: End-to-end integration tests — full pipeline wake-to-TTS, barge-in, session persistence, protocol mismatch rejection, and error code behavior.
 
 ### tests/test_prompt_cleaning.py
 Description: Tests for citation/source stripping in assistant responses, including German source formats.
@@ -134,13 +134,24 @@ Description: Tests for citation/source stripping in assistant responses, includi
 Description: Tests for OpenRouter retry behavior on transient failures and no-retry on 401.
 
 ### tests/test_audio_capture_drops.py
-Description: Tests for dropped-frame counters in audio capture under queue pressure.
+Description: Tests for dropped-frame counters and clipping-safe PCM conversion in audio capture.
+
+### tests/test_connection.py
+Description: Tests for client connection offline outbound buffering, TTL expiry, and reconnect flush ordering.
 
 ### tests/test_language_detection.py
 Description: Tests for EN/DE response language detection and fallback behavior.
 
 ### tests/test_metrics.py
 Description: Tests for metrics flush interval coercion, write-failure tolerance, and serialization-failure handling.
+
+## Docs
+
+### docs/robustness_checklist.md
+Description: Manual reliability validation checklist covering core flows, protocol mismatch handling, reconnect buffering behavior, fault injection, and soak-test criteria.
+
+### docs/deployment_agent_rpi4_ubuntu_minipc.md
+Description: Agent-executable deployment specification for fresh-machine provisioning of Raspberry Pi 4 client and Ubuntu Mini PC server with systemd services.
 
 ## Configuration
 
@@ -157,6 +168,12 @@ Description: Heavy server dependencies for Mini PC (faster-whisper, piper-tts, f
 
 ### scripts/soak_test.py
 Description: Soak monitoring utility for long-run robustness checks.
+
+### scripts/deploy_server.sh
+Description: Agent-executable Ubuntu Mini PC server deployment script for provisioning dependencies, configuring runtime, and managing `leonardo-server` service.
+
+### scripts/deploy_client.sh
+Description: Agent-executable Raspberry Pi client deployment script for provisioning dependencies, configuring client runtime, and managing `leonardo-client` service.
 
 ### models/piper/.gitkeep
 Description: Placeholder for Piper ONNX voice model files.

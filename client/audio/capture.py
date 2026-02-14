@@ -33,7 +33,8 @@ class AudioCapture:
         if status:
             pass  # Silently ignore xruns to avoid log spam
         mono = indata[:, 0] if indata.shape[1] > 1 else indata.ravel()
-        int16_data = (mono * 32767).astype(np.int16)
+        mono_clipped = np.clip(mono, -1.0, 1.0)
+        int16_data = (mono_clipped * 32767).astype(np.int16)
         self.ring_buffer.write(int16_data)
         try:
             self.frame_queue.put_nowait(int16_data)

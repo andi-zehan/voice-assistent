@@ -31,12 +31,15 @@ Validate Leonardo voice assistant reliability across main flows and hard corner 
 8. TTS failure and recovery path
 9. Audio callback pressure (observe dropped frame metric)
 10. Rapid repeated wake words and interrupted turns
+11. Utterance metadata sample mismatch: small mismatch accepted, large mismatch rejected
+12. Client reconnect while sending wake/utterance/barge-in events (verify buffered outbound replay)
 
 ## Fault Injection (Manual)
 1. STT failure: force exception in `WhisperSTT.transcribe` and verify follow-up recovery
 2. LLM failure: block outbound network and verify error earcon + follow-up recovery
 3. TTS failure: break selected TTS voice/model and verify pipeline error handling
 4. Metrics failure: set metrics path to unwritable location and verify assistant keeps running
+5. Trigger protocol errors: send malformed utterance metadata and verify stable error code response
 
 ## Soak Test
 1. Reset or rotate metrics file

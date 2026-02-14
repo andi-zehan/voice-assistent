@@ -115,8 +115,10 @@ def make_session_cleared() -> str:
     return encode_json({"type": SESSION_CLEARED})
 
 
-def make_error(message: str, stage: str = "") -> str:
+def make_error(message: str, stage: str = "", code: str = "") -> str:
     msg = {"type": ERROR, "message": message}
     if stage:
         msg["stage"] = stage
+    if code:
+        msg["code"] = code
     return encode_json(msg)
