@@ -2,7 +2,7 @@
 
 import re
 
-DEFAULT_SYSTEM_PROMPT = (
+_BASE_SYSTEM_PROMPT = (
     "You are Jarvis, a helpful and concise voice assistant. "
     "Your responses will be spoken aloud by a text-to-speech engine. "
     "Be concise and to the point. "
@@ -12,6 +12,31 @@ DEFAULT_SYSTEM_PROMPT = (
     "Just answer naturally as a human would in a spoken conversation. "
     "If you don't know something, say so honestly."
 )
+
+_LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "de": "German",
+}
+
+DEFAULT_SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT
+
+
+def get_system_prompt(language: str | None = None) -> str:
+    """Return the system prompt, optionally tailored to *language*.
+
+    When *language* is ``None`` or ``"en"``, the base English prompt is returned.
+    For other languages the LLM is instructed to respond in that language.
+    """
+    if not language or language == "en":
+        return _BASE_SYSTEM_PROMPT
+
+    lang_name = _LANGUAGE_NAMES.get(language, language)
+    return (
+        f"{_BASE_SYSTEM_PROMPT} "
+        f"The user is speaking in {lang_name}. "
+        f"Always respond in {lang_name} unless the user explicitly asks "
+        "for a different language (for example, when requesting a translation)."
+    )
 
 
 def clean_for_tts(text: str) -> str:

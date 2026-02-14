@@ -10,17 +10,26 @@ class VoiceActivityDetector:
 
     Handles splitting larger frames (e.g. 1280 samples / 80ms) into
     VAD-compatible sub-frames (320 samples / 20ms at 16kHz).
+
+    An energy gate rejects quiet frames that WebRTC VAD might
+    misclassify as speech (e.g. ambient noise, fan hum).
     """
 
     def __init__(self, vad_config: dict, sample_rate: int = 16000):
         self._sample_rate = sample_rate
         self._frame_duration_ms = vad_config["frame_duration_ms"]
         self._frame_size = int(sample_rate * self._frame_duration_ms / 1000)
+        self._energy_threshold = vad_config.get("energy_threshold", 300)
 
         self._vad = webrtcvad.Vad(vad_config["aggressiveness"])
 
     def is_speech(self, frame_int16: np.ndarray) -> bool:
         """Check if any sub-frame in the given audio contains speech."""
+        # Energy gate: reject quiet frames regardless of WebRTC verdict
+        rms = np.sqrt(np.mean(frame_int16.astype(np.float32) ** 2))
+        if rms < self._energy_threshold:
+            return False
+
         audio_bytes = frame_int16.tobytes()
         chunk_bytes = self._frame_size * 2  # int16 = 2 bytes per sample
 

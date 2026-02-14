@@ -2,7 +2,6 @@
 
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np
@@ -17,15 +16,30 @@ class MacTTS:
     """
 
     def __init__(self, tts_config: dict):
-        self._voice = tts_config["voice"]
         self._rate = tts_config["rate"]
         self._output_sample_rate = tts_config.get("output_sample_rate", 22050)
+        self._default_language = tts_config.get("default_language", "en")
 
-    def synthesize(self, text: str) -> tuple[np.ndarray, int]:
-        """Convert text to audio.
+        # Build language → voice mapping from voices config
+        self._voice_map: dict[str, str] = {}
+        voices_cfg = tts_config.get("voices")
+        if voices_cfg:
+            for lang, voice_cfg in voices_cfg.items():
+                say_voice = voice_cfg.get("say_voice")
+                if say_voice:
+                    self._voice_map[lang] = say_voice
+        else:
+            # Backward compat: flat voice key
+            self._voice_map[self._default_language] = tts_config["voice"]
+
+    def synthesize(self, text: str, language: str | None = None) -> tuple[np.ndarray, int]:
+        """Convert text to audio using the voice for *language*.
 
         Returns (audio_float32, sample_rate).
         """
+        lang = language if language and language in self._voice_map else self._default_language
+        voice = self._voice_map[lang]
+
         with tempfile.NamedTemporaryFile(suffix=".aiff", delete=False) as f:
             tmp_path = f.name
 
@@ -33,7 +47,7 @@ class MacTTS:
             subprocess.run(
                 [
                     "say",
-                    "-v", self._voice,
+                    "-v", voice,
                     "-r", str(self._rate),
                     "-o", tmp_path,
                     text,

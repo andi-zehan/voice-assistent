@@ -11,8 +11,14 @@ import numpy as np
 class TTSEngine(Protocol):
     """Any TTS backend must implement this interface."""
 
-    def synthesize(self, text: str) -> tuple[np.ndarray, int]:
+    def synthesize(self, text: str, language: str | None = None) -> tuple[np.ndarray, int]:
         """Convert *text* to audio.
+
+        Args:
+            text: The text to synthesize.
+            language: ISO 639-1 code (e.g. ``"en"``, ``"de"``). Used to select
+                the matching voice. Falls back to the configured default when
+                *None* or when the language has no voice.
 
         Returns ``(audio_float32, sample_rate)``.
         """

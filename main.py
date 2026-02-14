@@ -58,19 +58,19 @@ def main():
 
     # Graceful shutdown on Ctrl+C / SIGTERM
     def shutdown(signum, frame):
-        print("\nShutting down...")
+        print("\n\033[32mShutting down...\033[0m")
         machine.stop()
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    print("Jarvis Voice Assistant starting...")
+    print("\033[32mJarvis Voice Assistant starting...\033[0m")
     try:
         machine.run()
     finally:
         capture.stop()
         metrics.flush()
-        print("Goodbye.")
+        print("\033[32mGoodbye.\033[0m")
 
 
 if __name__ == "__main__":

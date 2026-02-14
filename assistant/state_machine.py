@@ -6,6 +6,14 @@ import traceback
 
 import numpy as np
 
+# ANSI color codes for terminal output
+_DIM = "\033[90m"       # Gray — state transitions, timing stats
+_CYAN = "\033[36m"      # Cyan — user speech (STT transcript)
+_BOLD = "\033[1m"       # Bold white — LLM response
+_YELLOW = "\033[33m"    # Yellow — events (wake, barge-in, follow-up)
+_RED = "\033[31m"       # Red — errors, rejections, timeouts
+_RST = "\033[0m"        # Reset
+
 from audio.capture import AudioCapture
 from audio.playback import AudioPlayer
 from audio.vad import VoiceActivityDetector, UtteranceDetector
@@ -13,7 +21,7 @@ from audio.earcon import play_earcon, play_named_earcon
 from wake.detector import WakeWordDetector
 from stt.whisper_stt import WhisperSTT
 from llm.openrouter_client import OpenRouterClient
-from llm.prompt import DEFAULT_SYSTEM_PROMPT, build_messages, clean_for_tts
+from llm.prompt import get_system_prompt, build_messages, clean_for_tts
 from tts import TTSEngine
 from assistant.session import Session
 from assistant.metrics import MetricsLogger
@@ -21,6 +29,7 @@ from assistant.metrics import MetricsLogger
 
 # Common Whisper hallucinations on silence/noise
 _HALLUCINATION_PHRASES = {
+    # English
     "thank you for watching",
     "thanks for watching",
     "subscribe to my channel",
@@ -34,7 +43,51 @@ _HALLUCINATION_PHRASES = {
     "the end",
     "you",
     "i'm sorry",
+    # German
+    "danke fürs zuschauen",
+    "danke für's zuschauen",
+    "vielen dank fürs zuschauen",
+    "bis zum nächsten mal",
+    "tschüss",
+    "untertitel von stephanie geiges",
+    "untertitel der amara.org-community",
+    "untertitel im auftrag des zdf für funk",
 }
+
+_ERROR_MESSAGES: dict[str, str] = {
+    "en": "Sorry, something went wrong.",
+    "de": "Entschuldigung, da ist etwas schiefgelaufen.",
+}
+
+# German-specific characters and common function words for language detection.
+# More reliable than langdetect for short text and our EN/DE use case.
+_DE_CHARS = set("äöüßÄÖÜ")
+# Words that are unambiguously German (never standalone English words).
+# A single match is enough to identify German.
+_DE_STRONG = {
+    "ich", "und", "der", "das", "ist", "ein", "eine", "nicht", "auf",
+    "mit", "den", "dem", "sich", "von", "für", "aber", "wenn",
+    "nur", "noch", "nach", "auch", "schon", "dann", "kann", "wir",
+    "uns", "ihr", "wird", "oder", "sind", "bei", "haben", "hatte",
+    "habe", "dir", "sehr", "hier", "diese", "dieser",
+    "geht", "gibt", "bitte", "gerne", "danke", "jetzt", "kein",
+    "keine", "mein", "meine", "dein", "immer", "dort", "denn", "weil",
+}
+def _detect_response_language(text: str, fallback: str = "en") -> str:
+    """Detect whether *text* is German or English for TTS voice selection.
+
+    Uses German orthographic markers (ä/ö/ü/ß) and common function words.
+    Defaults to English when no German markers are found.
+    """
+    if any(c in _DE_CHARS for c in text):
+        return "de"
+
+    words = {w.strip(".,!?;:\"'()[]") for w in text.lower().split()}
+    if words & _DE_STRONG:
+        return "de"
+
+    # No German markers → English
+    return "en"
 
 
 def _check_hallucination(
@@ -108,14 +161,18 @@ class StateMachine:
         # Earcon settings
         self._earcon_sr = config["audio"]["sample_rate"]
         self._earcon_vol = config["earcon"].get("volume", 0.3)
-        self._follow_up_grace_s = config["vad"].get("barge_in_grace_s", 1.0)
+        self._follow_up_grace_s = config["vad"].get("follow_up_grace_s", 0.3)
+        self._follow_up_onset_frames = config["vad"].get("speech_onset_frames", 3)
         self._follow_up_start_time = 0.0
         self._listening_timeout_s = config["vad"].get("listening_timeout_s", 8.0)
+        self._max_utterance_s = config["vad"].get("max_utterance_s", 30.0)
         self._listening_start_time = 0.0
+        self._listening_hard_start = 0.0  # Never reset — absolute cap
 
         # Frame buffer for capturing speech onset before transition to LISTENING
+        # 25 frames × 80ms = 2s of audio context
         self._recent_frames: list[tuple[np.ndarray, bool]] = []
-        self._recent_frames_max = self._barge_in_threshold + 4
+        self._recent_frames_max = 25
 
     @property
     def state(self) -> State:
@@ -124,7 +181,7 @@ class StateMachine:
     def _transition(self, new_state: State) -> None:
         old = self._state
         self._state = new_state
-        print(f"  [{old.value}] → [{new_state.value}]")
+        print(f"  {_DIM}[{old.value}] → [{new_state.value}]{_RST}")
         self._metrics.log("state_transition", old=old.value, new=new_state.value)
 
     def stop(self) -> None:
@@ -134,7 +191,7 @@ class StateMachine:
         """Main loop — start capture and process frames."""
         self._running = True
         self._capture.start()
-        print(f"  State: [{self._state.value}] — say the wake word...")
+        print(f"  {_DIM}State: [{self._state.value}] — say the wake word...{_RST}")
 
         while self._running:
             frame = self._capture.get_frame(timeout=0.2)
@@ -160,7 +217,7 @@ class StateMachine:
     def _handle_passive(self, frame) -> None:
         detected, score = self._wake_detector.process(frame)
         if detected:
-            print(f"  Wake word detected (score={score:.2f})")
+            print(f"  {_YELLOW}Wake word detected {_DIM}(score={score:.2f}){_RST}")
             self._metrics.log("wake_detected", score=score)
             self._wake_detector.reset()
 
@@ -171,27 +228,50 @@ class StateMachine:
 
             # Prepare for listening
             self._utterance_detector.reset()
-            self._listening_start_time = time.monotonic()
+            now = time.monotonic()
+            self._listening_start_time = now
+            self._listening_hard_start = now
             self._transition(State.LISTENING)
 
     def _handle_listening(self, frame) -> None:
-        # Safety timeout — return to PASSIVE if no utterance completes
-        if time.monotonic() - self._listening_start_time >= self._listening_timeout_s:
-            print("  Listening timed out, no speech detected")
+        now = time.monotonic()
+
+        # Hard cap — force-complete if listening has gone on too long (e.g. noisy room)
+        if now - self._listening_hard_start >= self._max_utterance_s:
+            if self._utterance_detector.state == "collecting":
+                print(f"  {_YELLOW}Max utterance time reached, processing collected audio{_RST}")
+                audio = self._utterance_detector.get_audio()
+                play_named_earcon(self._player, "heard", self._earcon_sr, self._earcon_vol)
+                self._player.wait_until_done(timeout=0.3)
+                self._transition(State.THINKING)
+                self._process_utterance(audio)
+            else:
+                print(f"  {_RED}Listening timed out, no speech detected{_RST}")
+                self._metrics.log("listening_timeout")
+                play_named_earcon(self._player, "goodbye", self._earcon_sr, self._earcon_vol)
+                self._player.wait_until_done(timeout=0.5)
+                self._session.clear()
+                self._transition(State.PASSIVE)
+                print(f"  {_DIM}State: [{self._state.value}] — say the wake word...{_RST}")
+            return
+
+        # Soft timeout — return to PASSIVE if no speech starts
+        if now - self._listening_start_time >= self._listening_timeout_s:
+            print(f"  {_RED}Listening timed out, no speech detected{_RST}")
             self._metrics.log("listening_timeout")
             play_named_earcon(self._player, "goodbye", self._earcon_sr, self._earcon_vol)
             self._player.wait_until_done(timeout=0.5)
             self._session.clear()
             self._transition(State.PASSIVE)
-            print(f"  State: [{self._state.value}] — say the wake word...")
+            print(f"  {_DIM}State: [{self._state.value}] — say the wake word...{_RST}")
             return
 
         is_speech = self._vad.is_speech(frame)
         state = self._utterance_detector.process(frame, is_speech)
 
-        # Reset timeout only after confirmed speech onset (not single noisy frames)
+        # Reset soft timeout once speech is confirmed (not single noisy frames)
         if self._utterance_detector.state == "collecting":
-            self._listening_start_time = time.monotonic()
+            self._listening_start_time = now
 
         if state == "complete":
             audio = self._utterance_detector.get_audio()
@@ -203,22 +283,24 @@ class StateMachine:
     def _process_utterance(self, audio) -> None:
         """Run STT → LLM → TTS pipeline (synchronous, runs in THINKING state)."""
         interaction_start = time.monotonic()
+        detected_lang: str | None = None
 
         try:
             # STT
             stt_result = self._stt.transcribe(audio, self._config["audio"]["sample_rate"])
             transcript = stt_result["text"]
+            detected_lang = stt_result.get("language")
             avg_logprob = stt_result["avg_logprob"]
             no_speech_prob = stt_result["no_speech_prob"]
             print(
-                f"  STT: \"{transcript}\" "
-                f"({stt_result['transcription_time_s']:.2f}s, "
-                f"logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})"
+                f"  {_CYAN}STT: \"{transcript}\"{_RST} "
+                f"{_DIM}(lang={detected_lang}, {stt_result['transcription_time_s']:.2f}s, "
+                f"logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f}){_RST}"
             )
             self._metrics.log("stt_complete", **stt_result)
 
             if not transcript.strip():
-                print("  Empty transcript, returning to follow-up")
+                print(f"  {_RED}Empty transcript, returning to follow-up{_RST}")
                 self._enter_follow_up()
                 return
 
@@ -230,26 +312,27 @@ class StateMachine:
                 logprob_threshold=stt_conf.get("logprob_threshold", -1.0),
             )
             if rejected:
-                print(f"  STT rejected ({reason}), returning to follow-up")
+                print(f"  {_RED}STT rejected ({reason}), returning to follow-up{_RST}")
                 self._metrics.log("stt_rejected", reason=reason, text=transcript)
                 self._enter_follow_up()
                 return
 
-            # LLM
+            # LLM — use language-aware system prompt
             self._session.add_user_message(transcript)
+            system_prompt = get_system_prompt(detected_lang)
             messages = build_messages(
-                DEFAULT_SYSTEM_PROMPT,
+                system_prompt,
                 self._session.get_messages()[:-1],  # History before current message
                 transcript,
             )
             llm_result = self._llm.chat(messages)
             response_text = llm_result["text"]
-            print(f"  LLM: \"{response_text}\"")
-            print(f"       (ttft={llm_result['ttft_s']:.2f}s, total={llm_result['elapsed_s']:.2f}s)")
+            print(f"  {_BOLD}LLM: \"{response_text}\"{_RST}")
+            print(f"       {_DIM}(ttft={llm_result['ttft_s']:.2f}s, total={llm_result['elapsed_s']:.2f}s){_RST}")
             self._metrics.log("llm_complete", **llm_result)
 
             if not response_text.strip():
-                print("  Empty LLM response")
+                print(f"  {_RED}Empty LLM response{_RST}")
                 self._enter_follow_up()
                 return
 
@@ -258,12 +341,16 @@ class StateMachine:
             # Clean response for TTS (strip citations, URLs, markdown)
             tts_text = clean_for_tts(response_text)
 
-            # TTS
+            # Detect response language for TTS voice (may differ from input
+            # when the user requests a translation)
+            response_lang = _detect_response_language(tts_text, fallback=detected_lang or "en")
+
+            # TTS — use response language to select voice
             tts_start = time.monotonic()
-            tts_audio, tts_sr = self._tts.synthesize(tts_text)
+            tts_audio, tts_sr = self._tts.synthesize(tts_text, language=response_lang)
             tts_elapsed = time.monotonic() - tts_start
-            print(f"  TTS: synthesized in {tts_elapsed:.2f}s")
-            self._metrics.log("tts_complete", duration_s=tts_elapsed)
+            print(f"  {_DIM}TTS: synthesized in {tts_elapsed:.2f}s (input={detected_lang}, voice={response_lang}){_RST}")
+            self._metrics.log("tts_complete", duration_s=tts_elapsed, input_language=detected_lang, voice_language=response_lang)
 
             # Log total pipeline latency
             total_elapsed = time.monotonic() - interaction_start
@@ -274,6 +361,8 @@ class StateMachine:
                 llm_ttft_s=llm_result["ttft_s"],
                 llm_total_s=llm_result["elapsed_s"],
                 tts_time_s=tts_elapsed,
+                input_language=detected_lang,
+                voice_language=response_lang,
             )
 
             # Play response
@@ -283,14 +372,15 @@ class StateMachine:
             self._transition(State.SPEAKING)
 
         except Exception as e:
-            print(f"  Pipeline error: {e}")
+            print(f"  {_RED}Pipeline error: {e}{_RST}")
             traceback.print_exc()
             self._metrics.log("pipeline_error", error=str(e))
             # Play error earcon, then try to speak the error
             play_named_earcon(self._player, "error", self._earcon_sr, self._earcon_vol)
             self._player.wait_until_done(timeout=0.5)
             try:
-                err_audio, err_sr = self._tts.synthesize("Sorry, something went wrong.")
+                err_msg = _ERROR_MESSAGES.get(detected_lang or "en", _ERROR_MESSAGES["en"])
+                err_audio, err_sr = self._tts.synthesize(err_msg, language=detected_lang)
                 self._player.play(err_audio, sample_rate=err_sr)
                 self._player.wait_until_done(timeout=5)
             except Exception:
@@ -320,7 +410,7 @@ class StateMachine:
         if is_speech:
             self._barge_in_count += 1
             if self._barge_in_count >= self._barge_in_threshold:
-                print("  Barge-in detected!")
+                print(f"  {_YELLOW}Barge-in detected!{_RST}")
                 self._metrics.log("barge_in")
                 self._player.stop()
                 self._utterance_detector.reset()
@@ -328,7 +418,9 @@ class StateMachine:
                     self._utterance_detector.process(buf_frame, buf_speech)
                 self._recent_frames.clear()
                 self._barge_in_count = 0
-                self._listening_start_time = time.monotonic()
+                now = time.monotonic()
+                self._listening_start_time = now
+                self._listening_hard_start = now
                 self._transition(State.LISTENING)
         else:
             self._barge_in_count = 0
@@ -338,27 +430,29 @@ class StateMachine:
         if self._state != State.FOLLOW_UP:
             return
 
-        # Grace period — ignore mic while earcon echo fades
-        if time.monotonic() - self._follow_up_start_time < self._follow_up_grace_s:
-            return
-
-        # Buffer recent frames so speech onset isn't lost
+        # Always buffer frames so speech during grace period isn't lost
         is_speech = self._vad.is_speech(frame)
         self._recent_frames.append((frame.copy(), is_speech))
         if len(self._recent_frames) > self._recent_frames_max:
             self._recent_frames.pop(0)
 
+        # Grace period — buffer frames but don't detect onset yet
+        if time.monotonic() - self._follow_up_start_time < self._follow_up_grace_s:
+            return
+
         if is_speech:
             self._barge_in_count += 1
-            if self._barge_in_count >= self._barge_in_threshold:
-                print("  Follow-up speech detected")
+            if self._barge_in_count >= self._follow_up_onset_frames:
+                print(f"  {_YELLOW}Follow-up speech detected{_RST}")
                 self._utterance_detector.reset()
                 # Replay buffered frames so the start of speech is captured
                 for buf_frame, buf_speech in self._recent_frames:
                     self._utterance_detector.process(buf_frame, buf_speech)
                 self._recent_frames.clear()
                 self._barge_in_count = 0
-                self._listening_start_time = time.monotonic()
+                now = time.monotonic()
+                self._listening_start_time = now
+                self._listening_hard_start = now
                 self._transition(State.LISTENING)
         else:
             self._barge_in_count = 0
@@ -369,7 +463,7 @@ class StateMachine:
             play_named_earcon(self._player, "goodbye", self._earcon_sr, self._earcon_vol)
             self._player.wait_until_done(timeout=0.5)
             self._transition(State.PASSIVE)
-            print(f"  State: [{self._state.value}] — say the wake word...")
+            print(f"  {_DIM}State: [{self._state.value}] — say the wake word...{_RST}")
 
     def _enter_follow_up(self) -> None:
         window = self._config["conversation"]["follow_up_window_s"]

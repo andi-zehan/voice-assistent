@@ -10,20 +10,23 @@ wake:
   threshold: 0.5            # Detection confidence threshold (0.0–1.0)
 
 vad:
-  aggressiveness: 2         # 0–3, higher = less sensitive to noise
+  aggressiveness: 3         # 0–3, higher = less sensitive to noise
   frame_duration_ms: 20     # Must be 10, 20, or 30
+  energy_threshold: 300     # Min RMS energy (int16) to accept as speech — filters ambient noise
   silence_timeout_ms: 1400  # Silence duration to declare end-of-utterance
   speech_onset_frames: 3    # Consecutive speech frames to confirm speech start
+  max_utterance_s: 30       # Hard cap on utterance collection — prevents stuck listening on noise
   barge_in_enabled: false    # Disable until AEC or headphones are enforced
   barge_in_frames: 8        # Consecutive speech frames to trigger barge-in
   barge_in_grace_s: 1.0     # Seconds to ignore mic after playback starts (avoids echo)
-  listening_timeout_s: 8.0  # Return to PASSIVE if no utterance completes within this time
+  follow_up_grace_s: 0.3    # Seconds to buffer (not discard) mic after follow-up earcon
+  listening_timeout_s: 8.0  # Return to PASSIVE if no speech starts within this time
 
 stt:
   model_size: "base"        # tiny, base, small, medium, large-v3
   device: "cpu"             # cpu or cuda
   compute_type: "int8"      # float16, int8, etc.
-  language: "en"             # Fixed to English
+  # language omitted — Whisper auto-detects spoken language
   no_speech_threshold: 0.85  # Reject if no_speech_prob >= this (lenient — VAD already pre-filters)
   logprob_threshold: -1.5    # Reject if avg_logprob < this (lenient — short words have low confidence)
 
@@ -38,15 +41,19 @@ llm:
 
 tts:
   engine: "piper"              # "piper" or "say"
-  # Piper (neural TTS)
   model_dir: "models/piper"
-  piper_voice: "en_GB-jenny_dioco-medium"
+  default_language: "en"       # Fallback when detected language has no voice
+  voices:
+    en:
+      piper_voice: "en_GB-jenny_dioco-medium"
+      say_voice: "Samantha"
+    de:
+      piper_voice: "de_DE-thorsten-medium"
+      say_voice: "Anna"
   sentence_silence: 0.2
   length_scale: 1.0           # Speaking speed (lower = faster, e.g. 0.8–1.2)
   noise_scale: 0.85          # Pitch variation (0 = monotone, higher = expressive)
   noise_w_scale: 0.95          # Timing variation (0 = robotic, higher = natural)
-  # macOS say (fallback)
-  voice: "Samantha"
   rate: 190
   output_sample_rate: 22050
 
