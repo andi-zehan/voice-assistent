@@ -13,7 +13,7 @@ from audio.vad import VoiceActivityDetector, UtteranceDetector
 from wake.detector import WakeWordDetector
 from stt.whisper_stt import WhisperSTT
 from llm.openrouter_client import OpenRouterClient
-from tts.mac_say import MacTTS
+from tts import create_tts
 from assistant.session import Session
 from assistant.metrics import MetricsLogger
 
@@ -38,7 +38,7 @@ def main():
     wake_detector = WakeWordDetector(config["wake"])
     stt = WhisperSTT(config["stt"])
     llm_client = OpenRouterClient(config["llm"])
-    tts = MacTTS(config["tts"])
+    tts = create_tts(config["tts"])
     session = Session(config["conversation"])
     metrics = MetricsLogger(config["metrics"])
 

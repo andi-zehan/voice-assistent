@@ -1,6 +1,6 @@
 # Project File Map
 
-Last updated: 2026-02-13
+Last updated: 2026-02-14
 
 ### prd_leonardo_voice_assistant_prototype_mac_all_in_one.md
 Description: Product requirements document for the Leonardo voice assistant prototype. Defines the full pipeline, state machine, tech stack, milestones, and acceptance criteria.
@@ -72,7 +72,13 @@ Description: OpenRouter streaming HTTP client with SSE parsing, warmup, and web 
 Description: System prompt definition and message list builder.
 
 ### tts/__init__.py
-Description: Package init for TTS module.
+Description: TTSEngine protocol definition and create_tts() factory for selecting Piper or macOS say backend.
 
 ### tts/mac_say.py
 Description: macOS `say` → AIFF temp file → numpy array pipeline for TTS.
+
+### tts/piper_tts.py
+Description: Piper neural TTS backend — loads ONNX voice model and synthesizes float32 audio via PiperVoice.
+
+### models/piper/.gitkeep
+Description: Placeholder for Piper ONNX voice model files (gitignored).

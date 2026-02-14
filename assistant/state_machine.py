@@ -12,7 +12,7 @@ from wake.detector import WakeWordDetector
 from stt.whisper_stt import WhisperSTT
 from llm.openrouter_client import OpenRouterClient
 from llm.prompt import DEFAULT_SYSTEM_PROMPT, build_messages, clean_for_tts
-from tts.mac_say import MacTTS
+from tts import TTSEngine
 from assistant.session import Session
 from assistant.metrics import MetricsLogger
 
@@ -38,7 +38,7 @@ class StateMachine:
         wake_detector: WakeWordDetector,
         stt: WhisperSTT,
         llm_client: OpenRouterClient,
-        tts: MacTTS,
+        tts: TTSEngine,
         session: Session,
         metrics: MetricsLogger,
     ):

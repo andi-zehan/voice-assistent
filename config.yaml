@@ -34,9 +34,15 @@ llm:
   timeout_s: 30
 
 tts:
-  voice: "Samantha"         # macOS say voice
-  rate: 190                 # Words per minute
-  output_sample_rate: 22050 # Sample rate of say output
+  engine: "piper"              # "piper" or "say"
+  # Piper (neural TTS)
+  model_dir: "models/piper"
+  piper_voice: "en_GB-jenny_dioco-medium"
+  sentence_silence: 0.2
+  # macOS say (fallback)
+  voice: "Samantha"
+  rate: 190
+  output_sample_rate: 22050
 
 conversation:
   max_turns: 10             # Max history turns kept

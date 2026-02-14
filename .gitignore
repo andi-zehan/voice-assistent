@@ -5,3 +5,5 @@ dist/
 build/
 metrics.jsonl
 .env
+models/piper/*.onnx
+models/piper/*.onnx.json
