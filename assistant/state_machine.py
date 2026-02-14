@@ -4,6 +4,8 @@ import enum
 import time
 import traceback
 
+import numpy as np
+
 from audio.capture import AudioCapture
 from audio.playback import AudioPlayer
 from audio.vad import VoiceActivityDetector, UtteranceDetector
@@ -15,6 +17,44 @@ from llm.prompt import DEFAULT_SYSTEM_PROMPT, build_messages, clean_for_tts
 from tts import TTSEngine
 from assistant.session import Session
 from assistant.metrics import MetricsLogger
+
+
+# Common Whisper hallucinations on silence/noise
+_HALLUCINATION_PHRASES = {
+    "thank you for watching",
+    "thanks for watching",
+    "subscribe to my channel",
+    "please subscribe",
+    "like and subscribe",
+    "see you in the next video",
+    "see you next time",
+    "bye bye",
+    "thank you",
+    "thanks for listening",
+    "the end",
+    "you",
+    "i'm sorry",
+}
+
+
+def _check_hallucination(
+    text: str,
+    no_speech_prob: float,
+    avg_logprob: float,
+    no_speech_threshold: float = 0.6,
+    logprob_threshold: float = -1.0,
+) -> tuple[bool, str]:
+    """Return (rejected, reason) if the transcript looks like a hallucination."""
+    if no_speech_prob >= no_speech_threshold:
+        return True, f"no_speech_prob={no_speech_prob:.2f}"
+
+    if avg_logprob < logprob_threshold:
+        return True, f"avg_logprob={avg_logprob:.2f}"
+
+    if text.strip().lower().rstrip(".!?,") in _HALLUCINATION_PHRASES:
+        return True, f"hallucination_blocklist"
+
+    return False, ""
 
 
 class State(enum.Enum):
@@ -68,6 +108,14 @@ class StateMachine:
         # Earcon settings
         self._earcon_sr = config["audio"]["sample_rate"]
         self._earcon_vol = config["earcon"].get("volume", 0.3)
+        self._follow_up_grace_s = config["vad"].get("barge_in_grace_s", 1.0)
+        self._follow_up_start_time = 0.0
+        self._listening_timeout_s = config["vad"].get("listening_timeout_s", 8.0)
+        self._listening_start_time = 0.0
+
+        # Frame buffer for capturing speech onset before transition to LISTENING
+        self._recent_frames: list[tuple[np.ndarray, bool]] = []
+        self._recent_frames_max = self._barge_in_threshold + 4
 
     @property
     def state(self) -> State:
@@ -123,11 +171,27 @@ class StateMachine:
 
             # Prepare for listening
             self._utterance_detector.reset()
+            self._listening_start_time = time.monotonic()
             self._transition(State.LISTENING)
 
     def _handle_listening(self, frame) -> None:
+        # Safety timeout — return to PASSIVE if no utterance completes
+        if time.monotonic() - self._listening_start_time >= self._listening_timeout_s:
+            print("  Listening timed out, no speech detected")
+            self._metrics.log("listening_timeout")
+            play_named_earcon(self._player, "goodbye", self._earcon_sr, self._earcon_vol)
+            self._player.wait_until_done(timeout=0.5)
+            self._session.clear()
+            self._transition(State.PASSIVE)
+            print(f"  State: [{self._state.value}] — say the wake word...")
+            return
+
         is_speech = self._vad.is_speech(frame)
         state = self._utterance_detector.process(frame, is_speech)
+
+        # Reset timeout only after confirmed speech onset (not single noisy frames)
+        if self._utterance_detector.state == "collecting":
+            self._listening_start_time = time.monotonic()
 
         if state == "complete":
             audio = self._utterance_detector.get_audio()
@@ -144,11 +208,30 @@ class StateMachine:
             # STT
             stt_result = self._stt.transcribe(audio, self._config["audio"]["sample_rate"])
             transcript = stt_result["text"]
-            print(f"  STT: \"{transcript}\" ({stt_result['transcription_time_s']:.2f}s)")
+            avg_logprob = stt_result["avg_logprob"]
+            no_speech_prob = stt_result["no_speech_prob"]
+            print(
+                f"  STT: \"{transcript}\" "
+                f"({stt_result['transcription_time_s']:.2f}s, "
+                f"logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})"
+            )
             self._metrics.log("stt_complete", **stt_result)
 
             if not transcript.strip():
                 print("  Empty transcript, returning to follow-up")
+                self._enter_follow_up()
+                return
+
+            # Filter hallucinations
+            stt_conf = self._config["stt"]
+            rejected, reason = _check_hallucination(
+                transcript, no_speech_prob, avg_logprob,
+                no_speech_threshold=stt_conf.get("no_speech_threshold", 0.6),
+                logprob_threshold=stt_conf.get("logprob_threshold", -1.0),
+            )
+            if rejected:
+                print(f"  STT rejected ({reason}), returning to follow-up")
+                self._metrics.log("stt_rejected", reason=reason, text=transcript)
                 self._enter_follow_up()
                 return
 
@@ -161,7 +244,7 @@ class StateMachine:
             )
             llm_result = self._llm.chat(messages)
             response_text = llm_result["text"]
-            print(f"  LLM: \"{response_text[:80]}{'...' if len(response_text) > 80 else ''}\"")
+            print(f"  LLM: \"{response_text}\"")
             print(f"       (ttft={llm_result['ttft_s']:.2f}s, total={llm_result['elapsed_s']:.2f}s)")
             self._metrics.log("llm_complete", **llm_result)
 
@@ -228,8 +311,12 @@ class StateMachine:
         if time.monotonic() - self._speaking_start_time < self._barge_in_grace_s:
             return
 
-        # Barge-in detection: monitor mic during playback
+        # Buffer recent frames so speech onset isn't lost on barge-in
         is_speech = self._vad.is_speech(frame)
+        self._recent_frames.append((frame.copy(), is_speech))
+        if len(self._recent_frames) > self._recent_frames_max:
+            self._recent_frames.pop(0)
+
         if is_speech:
             self._barge_in_count += 1
             if self._barge_in_count >= self._barge_in_threshold:
@@ -237,7 +324,11 @@ class StateMachine:
                 self._metrics.log("barge_in")
                 self._player.stop()
                 self._utterance_detector.reset()
+                for buf_frame, buf_speech in self._recent_frames:
+                    self._utterance_detector.process(buf_frame, buf_speech)
+                self._recent_frames.clear()
                 self._barge_in_count = 0
+                self._listening_start_time = time.monotonic()
                 self._transition(State.LISTENING)
         else:
             self._barge_in_count = 0
@@ -247,16 +338,27 @@ class StateMachine:
         if self._state != State.FOLLOW_UP:
             return
 
-        # Listen for speech onset to continue conversation
+        # Grace period — ignore mic while earcon echo fades
+        if time.monotonic() - self._follow_up_start_time < self._follow_up_grace_s:
+            return
+
+        # Buffer recent frames so speech onset isn't lost
         is_speech = self._vad.is_speech(frame)
+        self._recent_frames.append((frame.copy(), is_speech))
+        if len(self._recent_frames) > self._recent_frames_max:
+            self._recent_frames.pop(0)
+
         if is_speech:
             self._barge_in_count += 1
             if self._barge_in_count >= self._barge_in_threshold:
                 print("  Follow-up speech detected")
                 self._utterance_detector.reset()
-                # Pre-seed the utterance detector with speech frames
-                self._utterance_detector.process(frame, True)
+                # Replay buffered frames so the start of speech is captured
+                for buf_frame, buf_speech in self._recent_frames:
+                    self._utterance_detector.process(buf_frame, buf_speech)
+                self._recent_frames.clear()
                 self._barge_in_count = 0
+                self._listening_start_time = time.monotonic()
                 self._transition(State.LISTENING)
         else:
             self._barge_in_count = 0
@@ -273,6 +375,8 @@ class StateMachine:
         window = self._config["conversation"]["follow_up_window_s"]
         self._follow_up_deadline = time.monotonic() + window
         self._barge_in_count = 0
+        self._recent_frames.clear()
         play_named_earcon(self._player, "ready", self._earcon_sr, self._earcon_vol)
         self._player.wait_until_done(timeout=0.5)
+        self._follow_up_start_time = time.monotonic()
         self._transition(State.FOLLOW_UP)

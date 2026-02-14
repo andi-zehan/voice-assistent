@@ -3,7 +3,7 @@
 import re
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are Leonardo, a helpful and concise voice assistant. "
+    "You are Jarvis, a helpful and concise voice assistant. "
     "Your responses will be spoken aloud by a text-to-speech engine. "
     "Be concise and to the point. "
     "NEVER include citations, reference numbers, URLs, links, footnotes, "

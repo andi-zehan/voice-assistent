@@ -17,12 +17,15 @@ vad:
   barge_in_enabled: false    # Disable until AEC or headphones are enforced
   barge_in_frames: 8        # Consecutive speech frames to trigger barge-in
   barge_in_grace_s: 1.0     # Seconds to ignore mic after playback starts (avoids echo)
+  listening_timeout_s: 8.0  # Return to PASSIVE if no utterance completes within this time
 
 stt:
   model_size: "base"        # tiny, base, small, medium, large-v3
   device: "cpu"             # cpu or cuda
   compute_type: "int8"      # float16, int8, etc.
   language: "en"             # Fixed to English
+  no_speech_threshold: 0.85  # Reject if no_speech_prob >= this (lenient — VAD already pre-filters)
+  logprob_threshold: -1.5    # Reject if avg_logprob < this (lenient — short words have low confidence)
 
 llm:
   model: "openai/gpt-5-chat"
@@ -39,6 +42,9 @@ tts:
   model_dir: "models/piper"
   piper_voice: "en_GB-jenny_dioco-medium"
   sentence_silence: 0.2
+  length_scale: 1.0           # Speaking speed (lower = faster, e.g. 0.8–1.2)
+  noise_scale: 0.85          # Pitch variation (0 = monotone, higher = expressive)
+  noise_w_scale: 0.95          # Timing variation (0 = robotic, higher = natural)
   # macOS say (fallback)
   voice: "Samantha"
   rate: 190
@@ -46,7 +52,7 @@ tts:
 
 conversation:
   max_turns: 10             # Max history turns kept
-  max_tokens_budget: 2000   # Rough token budget for context trimming
+  max_tokens_budget: 8000   # Rough token budget for context trimming
   follow_up_window_s: 7.0   # Seconds to wait for follow-up before returning to PASSIVE
 
 metrics:

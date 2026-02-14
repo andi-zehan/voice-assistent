@@ -29,7 +29,7 @@ class OpenRouterClient:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "HTTP-Referer": "https://github.com/leonardo-assistant",
-            "X-Title": "Leonardo Voice Assistant",
+            "X-Title": "Jarvis Voice Assistant",
         }
 
     def warmup(self) -> None:

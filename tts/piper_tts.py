@@ -16,6 +16,9 @@ class PiperTTS:
         model_dir = Path(tts_config.get("model_dir", "models/piper"))
         voice_name = tts_config.get("piper_voice", "en_US-lessac-medium")
         self._sentence_silence = tts_config.get("sentence_silence", 0.2)
+        self._length_scale = tts_config.get("length_scale")
+        self._noise_scale = tts_config.get("noise_scale")
+        self._noise_w_scale = tts_config.get("noise_w_scale")
 
         model_path = model_dir / f"{voice_name}.onnx"
         if not model_path.exists():
@@ -36,11 +39,19 @@ class PiperTTS:
 
         Returns ``(audio_float32, sample_rate)``.
         """
+        from piper.config import SynthesisConfig
+
+        syn_config = SynthesisConfig(
+            length_scale=self._length_scale,
+            noise_scale=self._noise_scale,
+            noise_w_scale=self._noise_w_scale,
+        )
+
         silence_samples = int(self._sentence_silence * self._sample_rate)
         silence = np.zeros(silence_samples, dtype=np.float32)
 
         arrays: list[np.ndarray] = []
-        for chunk in self._voice.synthesize(text):
+        for chunk in self._voice.synthesize(text, syn_config=syn_config):
             if arrays:
                 arrays.append(silence)
             arrays.append(chunk.audio_float_array)

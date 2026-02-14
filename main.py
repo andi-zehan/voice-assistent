@@ -1,4 +1,4 @@
-"""Leonardo Voice Assistant — entry point."""
+"""Jarvis Voice Assistant — entry point."""
 
 import signal
 import sys
@@ -64,7 +64,7 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    print("Leonardo Voice Assistant starting...")
+    print("Jarvis Voice Assistant starting...")
     try:
         machine.run()
     finally:
