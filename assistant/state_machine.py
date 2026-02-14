@@ -22,6 +22,8 @@ from wake.detector import WakeWordDetector
 from stt.whisper_stt import WhisperSTT
 from llm.openrouter_client import OpenRouterClient
 from llm.prompt import get_system_prompt, build_messages, clean_for_tts
+from assistant.language import detect_response_language
+from assistant.telemetry import stt_metrics_payload, llm_metrics_payload
 from tts import TTSEngine
 from assistant.session import Session
 from assistant.metrics import MetricsLogger
@@ -58,36 +60,6 @@ _ERROR_MESSAGES: dict[str, str] = {
     "en": "Sorry, something went wrong.",
     "de": "Entschuldigung, da ist etwas schiefgelaufen.",
 }
-
-# German-specific characters and common function words for language detection.
-# More reliable than langdetect for short text and our EN/DE use case.
-_DE_CHARS = set("äöüßÄÖÜ")
-# Words that are unambiguously German (never standalone English words).
-# A single match is enough to identify German.
-_DE_STRONG = {
-    "ich", "und", "der", "das", "ist", "ein", "eine", "nicht", "auf",
-    "mit", "den", "dem", "sich", "von", "für", "aber", "wenn",
-    "nur", "noch", "nach", "auch", "schon", "dann", "kann", "wir",
-    "uns", "ihr", "wird", "oder", "sind", "bei", "haben", "hatte",
-    "habe", "dir", "sehr", "hier", "diese", "dieser",
-    "geht", "gibt", "bitte", "gerne", "danke", "jetzt", "kein",
-    "keine", "mein", "meine", "dein", "immer", "dort", "denn", "weil",
-}
-def _detect_response_language(text: str, fallback: str = "en") -> str:
-    """Detect whether *text* is German or English for TTS voice selection.
-
-    Uses German orthographic markers (ä/ö/ü/ß) and common function words.
-    Defaults to English when no German markers are found.
-    """
-    if any(c in _DE_CHARS for c in text):
-        return "de"
-
-    words = {w.strip(".,!?;:\"'()[]") for w in text.lower().split()}
-    if words & _DE_STRONG:
-        return "de"
-
-    # No German markers → English
-    return "en"
 
 
 def _check_hallucination(
@@ -146,6 +118,9 @@ class StateMachine:
         self._tts = tts
         self._session = session
         self._metrics = metrics
+        metrics_cfg = config.get("metrics", {})
+        self._log_transcripts = metrics_cfg.get("log_transcripts", False)
+        self._log_llm_text = metrics_cfg.get("log_llm_text", False)
 
         self._state = State.PASSIVE
         self._running = False
@@ -174,6 +149,10 @@ class StateMachine:
         self._recent_frames: list[tuple[np.ndarray, bool]] = []
         self._recent_frames_max = 25
 
+        # Periodic reporting for dropped audio capture frames.
+        self._capture_drop_report_s = config["audio"].get("capture_drop_report_s", 5.0)
+        self._last_capture_drop_report_s = time.monotonic()
+
     @property
     def state(self) -> State:
         return self._state
@@ -194,6 +173,9 @@ class StateMachine:
         print(f"  {_DIM}State: [{self._state.value}] — say the wake word...{_RST}")
 
         while self._running:
+            now = time.monotonic()
+            if now - self._last_capture_drop_report_s >= self._capture_drop_report_s:
+                self._report_capture_drops(now)
             frame = self._capture.get_frame(timeout=0.2)
             if frame is None:
                 # No frame available — still check follow-up timeout
@@ -211,6 +193,17 @@ class StateMachine:
                 self._handle_speaking(frame)
             elif self._state == State.FOLLOW_UP:
                 self._handle_follow_up(frame)
+
+    def _report_capture_drops(self, now_s: float) -> None:
+        """Periodically emit capture drop counters for visibility."""
+        self._last_capture_drop_report_s = now_s
+        if not hasattr(self._capture, "consume_dropped_frames"):
+            return
+        dropped = self._capture.consume_dropped_frames()
+        if dropped <= 0:
+            return
+        print(f"  {_YELLOW}Audio capture dropped {dropped} frame(s){_RST}")
+        self._metrics.log("audio_frame_drop", dropped_frames=dropped)
 
     # ── State Handlers ──────────────────────────────────────────────
 
@@ -292,12 +285,16 @@ class StateMachine:
             detected_lang = stt_result.get("language")
             avg_logprob = stt_result["avg_logprob"]
             no_speech_prob = stt_result["no_speech_prob"]
+            transcript_display = transcript if self._log_transcripts else f"<redacted:{len(transcript)} chars>"
             print(
-                f"  {_CYAN}STT: \"{transcript}\"{_RST} "
+                f"  {_CYAN}STT: \"{transcript_display}\"{_RST} "
                 f"{_DIM}(lang={detected_lang}, {stt_result['transcription_time_s']:.2f}s, "
                 f"logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f}){_RST}"
             )
-            self._metrics.log("stt_complete", **stt_result)
+            self._metrics.log(
+                "stt_complete",
+                **stt_metrics_payload(stt_result, include_text=self._log_transcripts),
+            )
 
             if not transcript.strip():
                 print(f"  {_RED}Empty transcript, returning to follow-up{_RST}")
@@ -313,7 +310,10 @@ class StateMachine:
             )
             if rejected:
                 print(f"  {_RED}STT rejected ({reason}), returning to follow-up{_RST}")
-                self._metrics.log("stt_rejected", reason=reason, text=transcript)
+                rejected_payload = {"reason": reason, "text_chars": len(transcript)}
+                if self._log_transcripts:
+                    rejected_payload["text"] = transcript
+                self._metrics.log("stt_rejected", **rejected_payload)
                 self._enter_follow_up()
                 return
 
@@ -327,9 +327,13 @@ class StateMachine:
             )
             llm_result = self._llm.chat(messages)
             response_text = llm_result["text"]
-            print(f"  {_BOLD}LLM: \"{response_text}\"{_RST}")
+            response_display = response_text if self._log_llm_text else f"<redacted:{len(response_text)} chars>"
+            print(f"  {_BOLD}LLM: \"{response_display}\"{_RST}")
             print(f"       {_DIM}(ttft={llm_result['ttft_s']:.2f}s, total={llm_result['elapsed_s']:.2f}s){_RST}")
-            self._metrics.log("llm_complete", **llm_result)
+            self._metrics.log(
+                "llm_complete",
+                **llm_metrics_payload(llm_result, include_text=self._log_llm_text),
+            )
 
             if not response_text.strip():
                 print(f"  {_RED}Empty LLM response{_RST}")
@@ -343,7 +347,7 @@ class StateMachine:
 
             # Detect response language for TTS voice (may differ from input
             # when the user requests a translation)
-            response_lang = _detect_response_language(tts_text, fallback=detected_lang or "en")
+            response_lang = detect_response_language(tts_text, fallback=detected_lang or "en")
 
             # TTS — use response language to select voice
             tts_start = time.monotonic()

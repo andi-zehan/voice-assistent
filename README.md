@@ -46,4 +46,19 @@ All settings are in `config.yaml` — audio devices, VAD sensitivity, STT model 
 
 ## Barge-in
 
-During a response, simply start speaking. Playback stops and the assistant listens to your new utterance. **Use headphones** to avoid echo-triggered false barge-ins.
+Barge-in is implemented but **disabled by default** (`vad.barge_in_enabled: false`) to avoid echo-triggered false interrupts without AEC.
+
+To enable it:
+
+1. Set `vad.barge_in_enabled: true` in `config.yaml`
+2. Keep `vad.barge_in_grace_s` and `vad.barge_in_frames` conservative
+3. Use headphones or an AEC-capable setup
+
+During a response, start speaking and playback will stop once speech onset is confirmed.
+
+## Privacy And Metrics
+
+Current development defaults keep full text logging on: `metrics.log_transcripts: true` and `metrics.log_llm_text: true`, so raw speech transcripts and assistant response text are written to `metrics.jsonl`.
+
+For safer handling in shared environments, set these keys to `false`.
+Those same flags also control whether transcript/response text is printed verbatim in the terminal.

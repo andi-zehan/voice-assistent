@@ -4,6 +4,7 @@ audio:
   dtype: int16
   blocksize: 1280          # 80ms frames — matches openWakeWord input
   ring_buffer_seconds: 30  # 30s circular buffer
+  capture_drop_report_s: 5.0  # Periodic metric/warning cadence for dropped callback frames
 
 wake:
   model_name: "hey_jarvis"  # Pre-trained openWakeWord model
@@ -38,6 +39,8 @@ llm:
   web_search: true          # Enable OpenRouter web search plugin
   warmup_enabled: true      # Fire-and-forget warmup on wake detection
   timeout_s: 30
+  max_retries: 2            # Retries for transient network/5xx/429 failures
+  retry_base_delay_s: 0.25  # Exponential backoff base delay
 
 tts:
   engine: "piper"              # "piper" or "say"
@@ -66,6 +69,8 @@ metrics:
   enabled: true
   file: "metrics.jsonl"
   flush_interval: 10        # Flush after N events
+  log_transcripts: true     # Development default: persist raw user speech
+  log_llm_text: true        # Development default: persist raw assistant responses
 
 earcon:
   frequency: 880            # Hz — A5 note

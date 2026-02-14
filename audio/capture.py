@@ -1,6 +1,7 @@
 """Microphone capture using sounddevice with callback-based streaming."""
 
 import queue
+import threading
 import numpy as np
 import sounddevice as sd
 
@@ -18,6 +19,8 @@ class AudioCapture:
         self._sample_rate = audio_config["sample_rate"]
         self._channels = audio_config["channels"]
         self._blocksize = audio_config["blocksize"]
+        self._dropped_frames = 0
+        self._dropped_lock = threading.Lock()
 
         self.ring_buffer = RingBuffer(
             max_seconds=audio_config["ring_buffer_seconds"],
@@ -36,6 +39,8 @@ class AudioCapture:
         try:
             self.frame_queue.put_nowait(int16_data)
         except queue.Full:
+            with self._dropped_lock:
+                self._dropped_frames += 1
             pass  # Drop frame rather than blocking the audio thread
 
     def start(self) -> None:
@@ -60,3 +65,16 @@ class AudioCapture:
             return self.frame_queue.get(timeout=timeout)
         except queue.Empty:
             return None
+
+    @property
+    def dropped_frames(self) -> int:
+        """Total number of dropped frames since process start."""
+        with self._dropped_lock:
+            return self._dropped_frames
+
+    def consume_dropped_frames(self) -> int:
+        """Return and reset dropped frame counter."""
+        with self._dropped_lock:
+            dropped = self._dropped_frames
+            self._dropped_frames = 0
+        return dropped

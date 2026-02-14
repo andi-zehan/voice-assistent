@@ -17,6 +17,9 @@ Description: All runtime configuration — audio, wake word, VAD, STT, LLM, TTS,
 ### README.md
 Description: Setup instructions, prerequisites, and usage guide.
 
+### SECURITY.md
+Description: Security and data-handling notes, including privacy defaults for metrics logging.
+
 ### main.py
 Description: Entry point. Loads config, initializes all components, wires them into the state machine, handles shutdown.
 
@@ -30,7 +33,13 @@ Description: Central 5-state orchestrator (PASSIVE → LISTENING → THINKING �
 Description: Conversation history management with turn and token budget trimming.
 
 ### assistant/metrics.py
-Description: Thread-safe JSONL event logger with buffered writes.
+Description: Thread-safe JSONL event logger with buffered writes, validation, and non-fatal I/O failure handling.
+
+### assistant/language.py
+Description: Response-language detection helper for selecting the correct TTS voice with fallback support.
+
+### assistant/telemetry.py
+Description: Privacy-aware metrics payload builders for STT/LLM events.
 
 ### audio/__init__.py
 Description: Package init for audio module.
@@ -66,7 +75,7 @@ Description: faster-whisper model loading and int16 audio transcription.
 Description: Package init for LLM module.
 
 ### llm/openrouter_client.py
-Description: OpenRouter streaming HTTP client with SSE parsing, warmup, and web search support.
+Description: OpenRouter streaming HTTP client with SSE parsing, warmup, web search support, and transient-failure retries.
 
 ### llm/prompt.py
 Description: System prompt definition and message list builder.
@@ -82,3 +91,21 @@ Description: Piper neural TTS backend — loads ONNX voice model and synthesizes
 
 ### models/piper/.gitkeep
 Description: Placeholder for Piper ONNX voice model files (gitignored).
+
+### tests/test_metrics.py
+Description: Tests for metrics flush interval coercion, write-failure tolerance, and serialization-failure handling.
+
+### tests/test_state_machine_privacy.py
+Description: Tests for privacy-safe STT/LLM telemetry payloads (raw text excluded by default).
+
+### tests/test_language_detection.py
+Description: Tests for EN/DE response language detection and fallback behavior.
+
+### tests/test_openrouter_retries.py
+Description: Tests for OpenRouter retry behavior on transient failures and no-retry behavior on 401 errors.
+
+### tests/test_audio_capture_drops.py
+Description: Tests for dropped-frame counters in audio capture under queue pressure.
+
+### tests/files_map.md
+Description: File map for the tests directory.
