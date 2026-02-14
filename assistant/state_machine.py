@@ -7,7 +7,7 @@ import traceback
 from audio.capture import AudioCapture
 from audio.playback import AudioPlayer
 from audio.vad import VoiceActivityDetector, UtteranceDetector
-from audio.earcon import play_earcon
+from audio.earcon import play_earcon, play_named_earcon
 from wake.detector import WakeWordDetector
 from stt.whisper_stt import WhisperSTT
 from llm.openrouter_client import OpenRouterClient
@@ -64,6 +64,10 @@ class StateMachine:
         self._barge_in_threshold = config["vad"].get("barge_in_frames", 8)
         self._speaking_start_time = 0.0
         self._barge_in_grace_s = config["vad"].get("barge_in_grace_s", 1.0)
+
+        # Earcon settings
+        self._earcon_sr = config["audio"]["sample_rate"]
+        self._earcon_vol = config["earcon"].get("volume", 0.3)
 
     @property
     def state(self) -> State:
@@ -127,6 +131,8 @@ class StateMachine:
 
         if state == "complete":
             audio = self._utterance_detector.get_audio()
+            play_named_earcon(self._player, "heard", self._earcon_sr, self._earcon_vol)
+            self._player.wait_until_done(timeout=0.3)
             self._transition(State.THINKING)
             self._process_utterance(audio)
 
@@ -197,7 +203,9 @@ class StateMachine:
             print(f"  Pipeline error: {e}")
             traceback.print_exc()
             self._metrics.log("pipeline_error", error=str(e))
-            # Try to speak the error
+            # Play error earcon, then try to speak the error
+            play_named_earcon(self._player, "error", self._earcon_sr, self._earcon_vol)
+            self._player.wait_until_done(timeout=0.5)
             try:
                 err_audio, err_sr = self._tts.synthesize("Sorry, something went wrong.")
                 self._player.play(err_audio, sample_rate=err_sr)
@@ -256,6 +264,8 @@ class StateMachine:
     def _check_follow_up_timeout(self) -> None:
         if time.monotonic() >= self._follow_up_deadline:
             self._session.clear()
+            play_named_earcon(self._player, "goodbye", self._earcon_sr, self._earcon_vol)
+            self._player.wait_until_done(timeout=0.5)
             self._transition(State.PASSIVE)
             print(f"  State: [{self._state.value}] — say the wake word...")
 
@@ -263,4 +273,6 @@ class StateMachine:
         window = self._config["conversation"]["follow_up_window_s"]
         self._follow_up_deadline = time.monotonic() + window
         self._barge_in_count = 0
+        play_named_earcon(self._player, "ready", self._earcon_sr, self._earcon_vol)
+        self._player.wait_until_done(timeout=0.5)
         self._transition(State.FOLLOW_UP)
