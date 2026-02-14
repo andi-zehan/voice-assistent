@@ -44,11 +44,7 @@ class OpenRouterClient:
         }
 
     def warmup(self) -> None:
-        """Fire-and-forget minimal request to warm up the API connection.
-
-        Sends a tiny streaming request (max_tokens=1) in a background thread.
-        The response is discarded — this just reduces TTFT for the real request.
-        """
+        """Fire-and-forget minimal request to warm up the API connection."""
         if not self._warmup_enabled:
             return
 
@@ -69,7 +65,7 @@ class OpenRouterClient:
                 )
                 resp.close()
             except Exception:
-                pass  # Warmup failure is not critical
+                pass
 
         threading.Thread(target=_do_warmup, daemon=True).start()
 
@@ -118,7 +114,7 @@ class OpenRouterClient:
                 for line in resp.iter_lines(decode_unicode=True):
                     if not line or not line.startswith("data: "):
                         continue
-                    data_str = line[6:]  # Strip "data: " prefix
+                    data_str = line[6:]
                     if data_str.strip() == "[DONE]":
                         break
                     try:
@@ -166,11 +162,9 @@ class OpenRouterClient:
         raise RuntimeError("OpenRouter chat failed without exception")
 
     def _should_retry_status(self, status_code: int) -> bool:
-        """Retry transient HTTP statuses only."""
         return status_code == 429 or status_code >= 500
 
     def _sleep_before_retry(self, attempt: int) -> None:
-        """Exponential backoff with a small jitter."""
         base = self._retry_base_delay_s * (2 ** attempt)
         jitter = random.uniform(0.0, base * 0.25)
         time.sleep(base + jitter)

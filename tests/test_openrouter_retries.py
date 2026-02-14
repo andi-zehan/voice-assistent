@@ -3,7 +3,7 @@ import os
 import pytest
 import requests
 
-from llm.openrouter_client import OpenRouterClient
+from server.llm.openrouter_client import OpenRouterClient
 
 
 class FakeResponse:
@@ -57,8 +57,8 @@ def test_retries_on_timeout_then_succeeds(monkeypatch) -> None:
             raise requests.Timeout("temporary timeout")
         return FakeResponse(200, success_lines)
 
-    monkeypatch.setattr("llm.openrouter_client.requests.post", _post)
-    monkeypatch.setattr("llm.openrouter_client.time.sleep", lambda *_: None)
+    monkeypatch.setattr("server.llm.openrouter_client.requests.post", _post)
+    monkeypatch.setattr("server.llm.openrouter_client.time.sleep", lambda *_: None)
 
     out = client.chat([{"role": "user", "content": "hi"}])
 
@@ -74,8 +74,8 @@ def test_does_not_retry_on_401(monkeypatch) -> None:
         calls["n"] += 1
         return FakeResponse(401)
 
-    monkeypatch.setattr("llm.openrouter_client.requests.post", _post)
-    monkeypatch.setattr("llm.openrouter_client.time.sleep", lambda *_: None)
+    monkeypatch.setattr("server.llm.openrouter_client.requests.post", _post)
+    monkeypatch.setattr("server.llm.openrouter_client.time.sleep", lambda *_: None)
 
     with pytest.raises(requests.HTTPError):
         client.chat([{"role": "user", "content": "hi"}])

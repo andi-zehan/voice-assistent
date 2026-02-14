@@ -1,0 +1,36 @@
+server:
+  host: "localhost"       # Server hostname or IP
+  port: 8765              # Server WebSocket port
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  dtype: int16
+  blocksize: 1280          # 80ms frames
+  ring_buffer_seconds: 30
+  capture_drop_report_s: 5.0
+
+wake:
+  model_name: "hey_jarvis"
+  threshold: 0.5
+
+vad:
+  aggressiveness: 3
+  frame_duration_ms: 20
+  energy_threshold: 300
+  silence_timeout_ms: 1400
+  speech_onset_frames: 3
+  max_utterance_s: 30
+  barge_in_enabled: false
+  barge_in_frames: 8
+  barge_in_grace_s: 1.0
+  follow_up_grace_s: 0.3
+  listening_timeout_s: 8.0
+
+conversation:
+  follow_up_window_s: 7.0
+
+earcon:
+  frequency: 880
+  duration_s: 0.15
+  volume: 0.3

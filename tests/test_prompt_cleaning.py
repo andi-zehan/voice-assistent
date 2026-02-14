@@ -1,4 +1,4 @@
-from llm.prompt import clean_for_tts
+from server.llm.prompt import clean_for_tts
 
 
 def test_removes_german_source_section_and_links() -> None:

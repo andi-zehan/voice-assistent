@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from assistant.metrics import MetricsLogger
+from server.assistant.metrics import MetricsLogger
 
 
 def test_flush_interval_is_coerced_to_one(tmp_path: Path) -> None:
@@ -33,7 +33,6 @@ def test_serialization_failure_drops_event_without_crashing(tmp_path: Path) -> N
     logger.log("event_a", value=object())
     logger.flush()
 
-    # Serialization failed and was dropped, so file can be absent or empty.
     path = tmp_path / "metrics.jsonl"
     if path.exists():
         assert path.read_text().strip() == ""

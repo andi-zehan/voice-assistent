@@ -23,11 +23,7 @@ DEFAULT_SYSTEM_PROMPT = _BASE_SYSTEM_PROMPT
 
 
 def get_system_prompt(language: str | None = None) -> str:
-    """Return the system prompt, optionally tailored to *language*.
-
-    When *language* is ``None`` or ``"en"``, the base English prompt is returned.
-    For other languages the LLM is instructed to respond in that language.
-    """
+    """Return the system prompt, optionally tailored to *language*."""
     if not language or language == "en":
         return _BASE_SYSTEM_PROMPT
 
@@ -42,30 +38,20 @@ def get_system_prompt(language: str | None = None) -> str:
 
 def clean_for_tts(text: str) -> str:
     """Strip citations, URLs, markdown, and other non-speakable artifacts."""
-    # Remove assistant citation control tokens used by some providers.
     text = re.sub(r'\uE200.*?\uE201', '', text, flags=re.DOTALL)
-    # Remove CJK-style citation brackets like 【1†source】 / 〖2〗
     text = re.sub(r'[\u3010\u3016][^\u3011\u3017]+[\u3011\u3017]', '', text)
-    # Remove markdown links [text](url) → text
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
-    # Remove bare URLs
     text = re.sub(r'https?://\S+', '', text)
-    # Remove citation markers like [1], [2, 3], [source], etc.
     text = re.sub(r'\[\d+(?:[,\s]*\d+)*\]', '', text)
     text = re.sub(r'\[(?:source|citation|ref)\w*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[(?:source|sources|citation|citations|ref\w*|quelle|quellen)[^\]]*\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\[\^(?:\d+|source|ref\w*)\]', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\((?:source|sources|citation|citations|reference|references|quelle|quellen)\s*:[^)]+\)', '', text, flags=re.IGNORECASE)
     text = re.sub(r'(?im)^\s*(?:sources?|references?|citations?|quellen?)\s*:\s*$', '', text)
-    # Remove footnote-style markers like ¹ ² ³
     text = re.sub(r'[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
-    # Remove markdown bold/italic markers
     text = re.sub(r'\*{1,3}([^*]+)\*{1,3}', r'\1', text)
-    # Remove markdown headers
     text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-    # Remove bullet point markers
     text = re.sub(r'^\s*[-*•]\s+', '', text, flags=re.MULTILINE)
-    # Drop lines that are only references/citations.
     kept_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
@@ -82,7 +68,6 @@ def clean_for_tts(text: str) -> str:
             continue
         kept_lines.append(line)
     text = "\n".join(kept_lines)
-    # Collapse multiple spaces/newlines
     text = re.sub(r'[ \t]+\n', '\n', text)
     text = re.sub(r'\n{2,}', '. ', text)
     text = re.sub(r'\n', ' ', text)
@@ -97,16 +82,7 @@ def build_messages(
     history: list[dict],
     user_text: str,
 ) -> list[dict]:
-    """Build the messages list for the LLM API call.
-
-    Args:
-        system_prompt: The system-level instruction.
-        history: Previous conversation turns [{"role": ..., "content": ...}, ...].
-        user_text: The latest user utterance.
-
-    Returns:
-        Full messages list including system, history, and the new user message.
-    """
+    """Build the messages list for the LLM API call."""
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})

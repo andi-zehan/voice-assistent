@@ -1,0 +1,7 @@
+# Client (Raspberry Pi) — lightweight, no ML models
+sounddevice>=0.5
+numpy>=1.24
+webrtcvad>=2.0.10
+openwakeword>=0.6
+websockets>=12.0
+pyyaml>=6.0

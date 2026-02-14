@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from audio.playback import AudioPlayer
+from client.audio.playback import AudioPlayer
 
 
 def generate_tone(
@@ -15,9 +15,8 @@ def generate_tone(
     t = np.linspace(0, duration_s, int(sample_rate * duration_s), endpoint=False)
     tone = np.sin(2 * np.pi * frequency * t)
 
-    # Apply a smooth fade-in / fade-out envelope
     envelope = np.ones_like(t)
-    fade_len = int(sample_rate * 0.02)  # 20ms fade
+    fade_len = int(sample_rate * 0.02)
     if fade_len > 0 and fade_len * 2 < len(t):
         envelope[:fade_len] = np.linspace(0, 1, fade_len)
         envelope[-fade_len:] = np.linspace(1, 0, fade_len)
@@ -29,11 +28,11 @@ def generate_earcon(name: str, sample_rate: int = 16000, volume: float = 0.3) ->
     """Generate a named earcon.
 
     Supported names:
-        wake       – rising chime on wake word detection (A5, 150ms)
-        heard      – short low confirmation when utterance captured (A4, 100ms)
-        ready      – two rising pips when follow-up window opens (E5→A5)
-        goodbye    – descending tone when session ends (A5→A4, 200ms)
-        error      – double low buzz on pipeline error (A3, 80ms×2)
+        wake       -- rising chime on wake word detection (A5, 150ms)
+        heard      -- short low confirmation when utterance captured (A4, 100ms)
+        ready      -- two rising pips when follow-up window opens (E5->A5)
+        goodbye    -- descending tone when session ends (A5->A4, 200ms)
+        error      -- double low buzz on pipeline error (A3, 80ms x2)
     """
     if name == "wake":
         return generate_tone(880, 0.15, volume, sample_rate)
@@ -66,8 +65,6 @@ def generate_earcon(name: str, sample_rate: int = 16000, volume: float = 0.3) ->
 
     raise ValueError(f"Unknown earcon: {name!r}")
 
-
-# ── Convenience player ───────────────────────────────────────────
 
 def play_earcon(player: AudioPlayer, earcon_config: dict, sample_rate: int = 16000) -> None:
     """Generate and play the wake earcon (legacy helper)."""

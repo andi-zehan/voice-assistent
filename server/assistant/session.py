@@ -30,16 +30,13 @@ class Session:
 
     def _trim(self) -> None:
         """Trim history to stay within turn and token budget limits."""
-        # Trim by turn count (each turn = one user + one assistant message)
         max_messages = self._max_turns * 2
         if len(self._history) > max_messages:
             self._history = self._history[-max_messages:]
 
-        # Rough token budget trimming (~4 chars per token)
         while len(self._history) > 2:
             total_chars = sum(len(m["content"]) for m in self._history)
             estimated_tokens = total_chars / 4
             if estimated_tokens <= self._max_tokens_budget:
                 break
-            # Remove oldest pair (user + assistant)
             self._history = self._history[2:]

@@ -4,30 +4,40 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "leonardo-assistant"
-version = "0.1.0"
-description = "macOS desktop voice assistant triggered by wake word"
+version = "0.2.0"
+description = "Voice assistant with client-server architecture (Raspberry Pi + Mini PC)"
 requires-python = ">=3.10"
 dependencies = [
-    "sounddevice>=0.5",
     "numpy>=1.24",
-    "soundfile>=0.12",
-    "webrtcvad>=2.0.10",
-    "openwakeword>=0.6",
-    "faster-whisper>=1.0",
-    "requests>=2.31",
     "pyyaml>=6.0",
-    "piper-tts>=1.4",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]
+client = [
+    "sounddevice>=0.5",
+    "webrtcvad>=2.0.10",
+    "openwakeword>=0.6",
+]
+server = [
+    "fastapi>=0.104",
+    "uvicorn[standard]>=0.24",
+    "faster-whisper>=1.0",
+    "requests>=2.31",
+    "piper-tts>=1.4",
+]
 dev = [
     "pytest>=7.0",
+    "pytest-asyncio>=0.23",
     "ruff>=0.1",
 ]
 
 [project.scripts]
-leonardo = "main:main"
+leonardo-client = "client.main:main"
+leonardo-server = "server.main:main"
 
-[tool.setuptools]
-py-modules = ["main"]
-packages = ["assistant", "audio", "wake", "stt", "llm", "tts"]
+[tool.setuptools.packages.find]
+include = ["shared*", "client*", "server*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

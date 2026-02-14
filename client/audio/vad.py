@@ -25,13 +25,12 @@ class VoiceActivityDetector:
 
     def is_speech(self, frame_int16: np.ndarray) -> bool:
         """Check if any sub-frame in the given audio contains speech."""
-        # Energy gate: reject quiet frames regardless of WebRTC verdict
         rms = np.sqrt(np.mean(frame_int16.astype(np.float32) ** 2))
         if rms < self._energy_threshold:
             return False
 
         audio_bytes = frame_int16.tobytes()
-        chunk_bytes = self._frame_size * 2  # int16 = 2 bytes per sample
+        chunk_bytes = self._frame_size * 2
 
         for offset in range(0, len(audio_bytes), chunk_bytes):
             chunk = audio_bytes[offset:offset + chunk_bytes]
@@ -49,13 +48,11 @@ class UtteranceDetector:
       - waiting: no speech detected yet
       - collecting: speech in progress, accumulating audio
       - complete: silence timeout reached, utterance is done
-      - timeout: no speech detected within the overall timeout
     """
 
     def __init__(self, vad_config: dict):
         self._silence_timeout_s = vad_config["silence_timeout_ms"] / 1000.0
         self._speech_onset_frames = vad_config["speech_onset_frames"]
-        # Keep a pre-buffer of frames so we don't lose audio before onset confirmation
         self._pre_buffer_size = self._speech_onset_frames + 4
 
         self._state = "waiting"
@@ -83,7 +80,6 @@ class UtteranceDetector:
             return self._state
 
         if self._state == "waiting":
-            # Keep a rolling pre-buffer so we capture audio before onset
             self._pre_buffer.append(frame_int16.copy())
             if len(self._pre_buffer) > self._pre_buffer_size:
                 self._pre_buffer.pop(0)
@@ -94,7 +90,6 @@ class UtteranceDetector:
 
             if self._state == "waiting" and self._consecutive_speech >= self._speech_onset_frames:
                 self._state = "collecting"
-                # Flush pre-buffer into audio chunks so the start of speech is preserved
                 self._audio_chunks.extend(self._pre_buffer)
                 self._pre_buffer.clear()
 

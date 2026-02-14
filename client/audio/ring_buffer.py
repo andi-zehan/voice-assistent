@@ -27,7 +27,6 @@ class RingBuffer:
         n = len(data)
         with self._lock:
             if n >= self._capacity:
-                # Data larger than buffer — keep only the tail
                 self._buf[:] = data[-self._capacity:]
                 self._write_pos = 0
                 self._total_written += n

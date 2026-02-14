@@ -8,8 +8,11 @@ import numpy as np
 def _load_audio_capture_with_fake_sounddevice(monkeypatch):
     fake_sd = types.SimpleNamespace(InputStream=object)
     monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
-    sys.modules.pop("audio.capture", None)
-    return importlib.import_module("audio.capture")
+    # Clear cached client audio modules
+    for mod_name in list(sys.modules.keys()):
+        if mod_name.startswith("client.audio"):
+            sys.modules.pop(mod_name, None)
+    return importlib.import_module("client.audio.capture")
 
 
 def test_dropped_frames_counter_increments_and_resets(monkeypatch) -> None:

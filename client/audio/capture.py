@@ -5,7 +5,7 @@ import threading
 import numpy as np
 import sounddevice as sd
 
-from audio.ring_buffer import RingBuffer
+from client.audio.ring_buffer import RingBuffer
 
 
 class AudioCapture:
@@ -32,7 +32,6 @@ class AudioCapture:
     def _callback(self, indata: np.ndarray, frames: int, time_info, status):
         if status:
             pass  # Silently ignore xruns to avoid log spam
-        # indata shape: (frames, channels), dtype float32
         mono = indata[:, 0] if indata.shape[1] > 1 else indata.ravel()
         int16_data = (mono * 32767).astype(np.int16)
         self.ring_buffer.write(int16_data)
@@ -41,7 +40,7 @@ class AudioCapture:
         except queue.Full:
             with self._dropped_lock:
                 self._dropped_frames += 1
-            pass  # Drop frame rather than blocking the audio thread
+            pass
 
     def start(self) -> None:
         self._stream = sd.InputStream(
@@ -68,7 +67,6 @@ class AudioCapture:
 
     @property
     def dropped_frames(self) -> int:
-        """Total number of dropped frames since process start."""
         with self._dropped_lock:
             return self._dropped_frames
 

@@ -1,4 +1,4 @@
-from assistant.language import detect_response_language
+from server.assistant.language import detect_response_language
 
 
 def test_detects_german_from_umlaut() -> None:

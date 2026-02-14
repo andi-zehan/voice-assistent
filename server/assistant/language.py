@@ -1,10 +1,6 @@
 """Language helpers for response voice selection."""
 
-# German-specific characters and common function words for language detection.
-# More reliable than langdetect for short text and our EN/DE use case.
 _DE_CHARS = set("äöüßÄÖÜ")
-# Words that are unambiguously German (never standalone English words).
-# A single match is enough to identify German.
 _DE_STRONG = {
     "ich", "und", "der", "das", "ist", "ein", "eine", "nicht", "auf",
     "mit", "den", "dem", "sich", "von", "für", "aber", "wenn",
@@ -17,11 +13,7 @@ _DE_STRONG = {
 
 
 def detect_response_language(text: str, fallback: str = "en") -> str:
-    """Detect whether *text* is German or English for TTS voice selection.
-
-    Uses German orthographic markers and common function words.
-    Returns *fallback* when no German markers are found.
-    """
+    """Detect whether *text* is German or English for TTS voice selection."""
     if any(c in _DE_CHARS for c in text):
         return "de"
 

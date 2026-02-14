@@ -60,7 +60,6 @@ class MetricsLogger:
             self._flush_locked_safe()
 
     def _flush_locked(self) -> None:
-        """Internal flush — must be called with lock held."""
         if not self._buffer:
             return
         with open(self._file_path, "a") as f:
@@ -69,11 +68,9 @@ class MetricsLogger:
         self._buffer.clear()
 
     def _flush_locked_safe(self) -> None:
-        """Flush and absorb filesystem errors so metrics never crash runtime."""
         try:
             self._flush_locked()
         except (OSError, ValueError):
-            # Drop buffered events to avoid unbounded memory growth.
             self._buffer.clear()
             self._write_error_count += 1
             self._warn_write_error("metrics flush failed; dropping buffered events")
