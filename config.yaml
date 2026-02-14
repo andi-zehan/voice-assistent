@@ -12,7 +12,7 @@ wake:
 vad:
   aggressiveness: 2         # 0–3, higher = less sensitive to noise
   frame_duration_ms: 20     # Must be 10, 20, or 30
-  silence_timeout_ms: 700   # Silence duration to declare end-of-utterance
+  silence_timeout_ms: 1400  # Silence duration to declare end-of-utterance
   speech_onset_frames: 3    # Consecutive speech frames to confirm speech start
   barge_in_enabled: false    # Disable until AEC or headphones are enforced
   barge_in_frames: 8        # Consecutive speech frames to trigger barge-in
@@ -25,7 +25,7 @@ stt:
   language: "en"             # Fixed to English
 
 llm:
-  model: "google/gemini-3-flash-preview"
+  model: "openai/gpt-5-chat"
   api_base: "https://openrouter.ai/api/v1"
   max_tokens: 512
   temperature: 0.7
@@ -41,7 +41,7 @@ tts:
 conversation:
   max_turns: 10             # Max history turns kept
   max_tokens_budget: 2000   # Rough token budget for context trimming
-  follow_up_window_s: 4.0   # Seconds to wait for follow-up before returning to PASSIVE
+  follow_up_window_s: 7.0   # Seconds to wait for follow-up before returning to PASSIVE
 
 metrics:
   enabled: true

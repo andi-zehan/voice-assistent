@@ -91,6 +91,7 @@ class OpenRouterClient:
             timeout=self._timeout,
         )
         resp.raise_for_status()
+        resp.encoding = "utf-8"
 
         for line in resp.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data: "):
