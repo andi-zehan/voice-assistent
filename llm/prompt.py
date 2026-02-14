@@ -10,7 +10,8 @@ _BASE_SYSTEM_PROMPT = (
     "source attributions, or any markup in your responses. "
     "Do not use markdown, bullet points, numbered lists, or code blocks. "
     "Just answer naturally as a human would in a spoken conversation. "
-    "If you don't know something, say so honestly."
+    "If you don't know something, say so honestly. "
+    "Even when web search is used, never mention sources or citations."
 )
 
 _LANGUAGE_NAMES: dict[str, str] = {
@@ -41,6 +42,10 @@ def get_system_prompt(language: str | None = None) -> str:
 
 def clean_for_tts(text: str) -> str:
     """Strip citations, URLs, markdown, and other non-speakable artifacts."""
+    # Remove assistant citation control tokens used by some providers.
+    text = re.sub(r'\uE200.*?\uE201', '', text, flags=re.DOTALL)
+    # Remove CJK-style citation brackets like 【1†source】 / 〖2〗
+    text = re.sub(r'[\u3010\u3016][^\u3011\u3017]+[\u3011\u3017]', '', text)
     # Remove markdown links [text](url) → text
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
     # Remove bare URLs
@@ -48,6 +53,10 @@ def clean_for_tts(text: str) -> str:
     # Remove citation markers like [1], [2, 3], [source], etc.
     text = re.sub(r'\[\d+(?:[,\s]*\d+)*\]', '', text)
     text = re.sub(r'\[(?:source|citation|ref)\w*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[(?:source|sources|citation|citations|ref\w*|quelle|quellen)[^\]]*\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[\^(?:\d+|source|ref\w*)\]', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\((?:source|sources|citation|citations|reference|references|quelle|quellen)\s*:[^)]+\)', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'(?im)^\s*(?:sources?|references?|citations?|quellen?)\s*:\s*$', '', text)
     # Remove footnote-style markers like ¹ ² ³
     text = re.sub(r'[¹²³⁴⁵⁶⁷⁸⁹⁰]+', '', text)
     # Remove markdown bold/italic markers
@@ -56,10 +65,30 @@ def clean_for_tts(text: str) -> str:
     text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
     # Remove bullet point markers
     text = re.sub(r'^\s*[-*•]\s+', '', text, flags=re.MULTILINE)
+    # Drop lines that are only references/citations.
+    kept_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            kept_lines.append(line)
+            continue
+        if re.match(r'(?i)^(?:sources?|references?|citations?|quellen?)\s*:?\s*$', stripped):
+            continue
+        if re.match(r'^(?:\[\d+\]|\d+[.)])\s*$', stripped):
+            continue
+        if re.match(r'(?i)^(?:\[\d+\]|\d+[.)])\s*(?:https?://\S+|www\.\S+)\s*$', stripped):
+            continue
+        if re.match(r'(?i)^(?:https?://\S+|www\.\S+)\s*$', stripped):
+            continue
+        kept_lines.append(line)
+    text = "\n".join(kept_lines)
     # Collapse multiple spaces/newlines
+    text = re.sub(r'[ \t]+\n', '\n', text)
     text = re.sub(r'\n{2,}', '. ', text)
     text = re.sub(r'\n', ' ', text)
     text = re.sub(r'  +', ' ', text)
+    text = re.sub(r'\s+([,.;:!?])', r'\1', text)
+    text = re.sub(r'([,.;:!?]){2,}', r'\1', text)
     return text.strip()
 
 

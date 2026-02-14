@@ -356,3 +356,30 @@ def test_tts_failure_enters_follow_up(monkeypatch):
     assert machine.state == sm.State.FOLLOW_UP
     assert len(session.history) == 2
     assert any(name == "pipeline_error" for name, _ in metrics.events)
+
+
+def test_llm_response_is_sanitized_before_session_and_metrics(monkeypatch):
+    sm = _load_state_machine_with_stubs(monkeypatch)
+    llm = FakeLLM(
+        result={
+            "text": "Das ist die Antwort【1†source】.\n\nQuellen:\n[1] https://example.com",
+            "model": "fake",
+            "elapsed_s": 0.2,
+            "ttft_s": 0.1,
+        }
+    )
+    machine, _, _, _, _, _, _, _, _, session, metrics = _build_machine(sm, llm=llm)
+
+    machine._state = sm.State.THINKING
+    machine._process_utterance(np.array([1, 2], dtype=np.int16))
+
+    assert machine.state == sm.State.SPEAKING
+    assert session.history[-1]["role"] == "assistant"
+    assert "Quellen" not in session.history[-1]["content"]
+    assert "https://" not in session.history[-1]["content"]
+
+    llm_complete = [data for name, data in metrics.events if name == "llm_complete"]
+    assert llm_complete
+    assert "Quellen" not in llm_complete[-1].get("text", "")
+    assert "https://" not in llm_complete[-1].get("text", "")
+    assert any(name == "llm_response_sanitized" for name, _ in metrics.events)

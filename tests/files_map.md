@@ -19,3 +19,6 @@ Description: Verifies capture dropped-frame counter increment/reset behavior whe
 
 ### test_state_machine_flow.py
 Description: Simulates state-machine transitions and fault-injection recovery for STT/LLM/TTS failures.
+
+### test_prompt_cleaning.py
+Description: Verifies removal of citation/source artifacts (including German formats) from model responses.

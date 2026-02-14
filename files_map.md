@@ -84,7 +84,7 @@ Description: Package init for LLM module.
 Description: OpenRouter streaming HTTP client with SSE parsing, warmup, web search support, and transient-failure retries.
 
 ### llm/prompt.py
-Description: System prompt definition and message list builder.
+Description: System prompt definition, response-cleaning utilities (citations/URLs/markup stripping), and message list builder.
 
 ### scripts/files_map.md
 Description: File map for the scripts directory.
@@ -121,6 +121,9 @@ Description: Tests for dropped-frame counters in audio capture under queue press
 
 ### tests/test_state_machine_flow.py
 Description: State-machine simulation tests for transition logic and injected STT/LLM/TTS failures.
+
+### tests/test_prompt_cleaning.py
+Description: Tests for citation/source stripping in assistant responses, including German source formats.
 
 ### tests/files_map.md
 Description: File map for the tests directory.

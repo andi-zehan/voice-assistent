@@ -326,7 +326,16 @@ class StateMachine:
                 transcript,
             )
             llm_result = self._llm.chat(messages)
-            response_text = llm_result["text"]
+            raw_response_text = llm_result["text"]
+            response_text = clean_for_tts(raw_response_text)
+            llm_result = {**llm_result, "text": response_text}
+            if response_text != raw_response_text:
+                self._metrics.log(
+                    "llm_response_sanitized",
+                    raw_chars=len(raw_response_text),
+                    clean_chars=len(response_text),
+                    removed_chars=max(0, len(raw_response_text) - len(response_text)),
+                )
             response_display = response_text if self._log_llm_text else f"<redacted:{len(response_text)} chars>"
             print(f"  {_BOLD}LLM: \"{response_display}\"{_RST}")
             print(f"       {_DIM}(ttft={llm_result['ttft_s']:.2f}s, total={llm_result['elapsed_s']:.2f}s){_RST}")
@@ -342,8 +351,8 @@ class StateMachine:
 
             self._session.add_assistant_message(response_text)
 
-            # Clean response for TTS (strip citations, URLs, markdown)
-            tts_text = clean_for_tts(response_text)
+            # Use cleaned response for TTS.
+            tts_text = response_text
 
             # Detect response language for TTS voice (may differ from input
             # when the user requests a translation)
