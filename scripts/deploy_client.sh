@@ -8,7 +8,7 @@ CLIENT_USER="${CLIENT_USER:-leonardo-client}"
 APP_DIR="${APP_DIR:-/opt/leonardo_v1}"
 REPO_URL="${REPO_URL:-https://github.com/andi-zehan/voice-assistent.git}"
 REPO_REF="${REPO_REF:-main}"
-SERVER_IP="${SERVER_IP:-192.168.1.50}"
+SERVER_IP="${SERVER_IP:-192.168.178.66}"
 SERVER_PORT="${SERVER_PORT:-8765}"
 
 run_as_client_user() {

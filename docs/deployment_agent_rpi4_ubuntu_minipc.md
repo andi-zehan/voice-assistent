@@ -7,22 +7,59 @@ This document is for automated deployment agents. It is not a narrative guide.
 - Service manager: `systemd`
 - Host OS assumption: fresh Ubuntu-class install with `sudo` access
 
+## Current Deployment Status (2026-02-16)
+
+### Server: DEPLOYED on `mediabox.local` (Ubuntu 24.04 LTS)
+
+- **Host**: `mediabox.local` / `192.168.178.66`
+- **Service**: `leonardo-server.service` — active, enabled
+- **Port**: 8765 (WebSocket), listening on `0.0.0.0`, iptables rule added
+- **App dir**: `/opt/leonardo_v1`
+- **Service user**: `leonardo`
+- **Branch deployed**: `feat/client-server-split` (commit `48268d3`)
+- **API key env var**: `LEO_OPENROUTER_API_KEY` (stored in `/etc/leonardo/server.env`)
+- **TTS voices**: Piper en (jenny_dioco-medium) + de (thorsten-medium) downloaded
+- **STT model**: faster-whisper-base (auto-downloaded on first start)
+- **Verified**: WebSocket pipeline tested (wake → warmup_ack → utterance_audio → STT → response)
+
+**Note**: The Caddy repo on this server has an expired GPG key. If re-running the deploy script, temporarily disable it first:
+```bash
+sudo mv /etc/apt/sources.list.d/caddy-stable.list /etc/apt/sources.list.d/caddy-stable.list.disabled
+# run deploy...
+sudo mv /etc/apt/sources.list.d/caddy-stable.list.disabled /etc/apt/sources.list.d/caddy-stable.list
+```
+
+**Note**: The iptables rule allowing port 8765 is not persistent across reboots. To make it permanent:
+```bash
+sudo apt-get install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+### Client: NOT YET DEPLOYED (RPi4 not available)
+
+See "Deploying the RPi4 Client" section below for step-by-step instructions.
+
 ## 0. Required Inputs
 
 Set these variables before running any steps.
 
 ```bash
-export SERVER_HOSTNAME="minipc"
-export SERVER_IP="192.168.1.50"
+# Server (already deployed — values for reference)
+export SERVER_HOSTNAME="mediabox"
+export SERVER_IP="192.168.178.66"
 export SERVER_USER="leonardo"
-export CLIENT_HOSTNAME="rpi4"
-export CLIENT_IP="192.168.1.60"
+export SERVER_PORT="8765"
+
+# Client (set these when RPi4 arrives)
+export CLIENT_HOSTNAME="rpi4"          # adjust to actual hostname
+export CLIENT_IP="192.168.178.XX"      # adjust to actual IP
 export CLIENT_USER="leonardo-client"
+
+# Shared
 export APP_DIR="/opt/leonardo_v1"
 export REPO_URL="https://github.com/andi-zehan/voice-assistent.git"
-export REPO_REF="main"
+export REPO_REF="feat/client-server-split"
 export LEO_OPENROUTER_API_KEY="REPLACE_ME"
-export SERVER_PORT="8765"
 export PIPER_EN_VOICE="en_GB-jenny_dioco-medium"
 export PIPER_DE_VOICE="de_DE-thorsten-medium"
 export PIPER_EN_ONNX_URL="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx"
@@ -274,6 +311,68 @@ if command -v ufw >/dev/null 2>&1; then
   sudo ufw allow "${SERVER_PORT}/tcp"
 fi
 ```
+
+## Deploying the RPi4 Client (Quick Start)
+
+When the Raspberry Pi 4 arrives, follow these steps:
+
+### Prerequisites
+
+1. Flash Raspberry Pi OS (64-bit, Lite or Desktop) or Ubuntu Server onto the SD card
+2. Enable SSH, connect to the same LAN as `mediabox.local`
+3. Attach a USB microphone and speaker/headphones
+4. Note the RPi4's IP address and hostname
+
+### Verify server is still running
+
+From your Mac:
+```bash
+nc -z -w 3 192.168.178.66 8765 && echo "Server OK" || echo "Server DOWN"
+# If down:
+ssh paze@mediabox.local 'sudo systemctl start leonardo-server.service'
+```
+
+### Run the client deploy script
+
+SSH into the RPi4, then:
+```bash
+export SERVER_IP="192.168.178.66"
+export SERVER_PORT="8765"
+export REPO_REF="feat/client-server-split"
+# Optional: override defaults
+# export CLIENT_HOSTNAME="rpi4"
+# export CLIENT_USER="leonardo-client"
+
+BOOTSTRAP_DIR="/tmp/leonardo_bootstrap_client"
+rm -rf "$BOOTSTRAP_DIR"
+git clone --branch "$REPO_REF" https://github.com/andi-zehan/voice-assistent.git "$BOOTSTRAP_DIR"
+cd "$BOOTSTRAP_DIR"
+sudo -E ./scripts/deploy_client.sh
+```
+
+### Post-deployment validation
+
+```bash
+# Service running?
+sudo systemctl status leonardo-client.service
+
+# Connected to server?
+sudo journalctl -u leonardo-client.service -n 50 --no-pager | grep "Connected to server"
+
+# Audio devices detected?
+sudo journalctl -u leonardo-client.service -n 50 --no-pager | grep -i "audio\|device\|microphone"
+
+# Test end-to-end: say the wake word and check server logs
+ssh paze@mediabox.local 'sudo journalctl -u leonardo-server.service -n 20 --no-pager'
+```
+
+### Troubleshooting
+
+- **No audio devices**: ensure USB mic is plugged in, check `arecord -l` and `aplay -l`
+- **Can't reach server**: check `nc -z -w 3 192.168.178.66 8765` from the RPi4; if blocked, re-add iptables rule on server
+- **Service crash loop**: check `sudo journalctl -u leonardo-client.service -n 100 --no-pager` for errors
+
+---
 
 ## 3. Provision Client (Run On Raspberry Pi 4)
 

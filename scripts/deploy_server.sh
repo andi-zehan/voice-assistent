@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Agent-executable deployment script for Ubuntu Mini PC server.
 
-SERVER_HOSTNAME="${SERVER_HOSTNAME:-minipc}"
+SERVER_HOSTNAME="${SERVER_HOSTNAME:-mediabox}"
 SERVER_USER="${SERVER_USER:-leonardo}"
 APP_DIR="${APP_DIR:-/opt/leonardo_v1}"
 REPO_URL="${REPO_URL:-https://github.com/andi-zehan/voice-assistent.git}"
