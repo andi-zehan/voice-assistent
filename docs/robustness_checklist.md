@@ -5,7 +5,7 @@ Validate Leonardo voice assistant reliability across main flows and hard corner 
 
 ## Preconditions
 - Hardware: stable mic + speaker/headphones setup
-- Environment: `OPENROUTER_API_KEY` set and model files available
+- Environment: `LEO_OPENROUTER_API_KEY` set and model files available
 - Build: latest `main`, clean working tree, dependencies installed
 
 ## Baseline Validation

@@ -8,7 +8,7 @@ SERVER_USER="${SERVER_USER:-leonardo}"
 APP_DIR="${APP_DIR:-/opt/leonardo_v1}"
 REPO_URL="${REPO_URL:-https://github.com/andi-zehan/voice-assistent.git}"
 REPO_REF="${REPO_REF:-main}"
-OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
+LEO_OPENROUTER_API_KEY="${LEO_OPENROUTER_API_KEY:-}"
 SERVER_PORT="${SERVER_PORT:-8765}"
 PIPER_EN_VOICE="${PIPER_EN_VOICE:-en_GB-jenny_dioco-medium}"
 PIPER_DE_VOICE="${PIPER_DE_VOICE:-de_DE-thorsten-medium}"
@@ -33,7 +33,7 @@ run_as_server_user() {
 echo "[server] starting deployment on host $(hostname)"
 sudo -n true
 
-require_env OPENROUTER_API_KEY
+require_env LEO_OPENROUTER_API_KEY
 
 if [[ "$(hostname)" != "$SERVER_HOSTNAME" ]]; then
   echo "[server] warning: hostname mismatch (expected '$SERVER_HOSTNAME', got '$(hostname)')"
@@ -119,7 +119,7 @@ PY
 
 echo "[server] writing secure env file"
 sudo install -d -m 0750 -o root -g "$SERVER_USER" /etc/leonardo
-sudo env OPENROUTER_API_KEY="$OPENROUTER_API_KEY" bash -c 'umask 027; printf "OPENROUTER_API_KEY=%s\n" "$OPENROUTER_API_KEY" > /etc/leonardo/server.env'
+sudo env LEO_OPENROUTER_API_KEY="$LEO_OPENROUTER_API_KEY" bash -c 'umask 027; printf "LEO_OPENROUTER_API_KEY=%s\n" "$LEO_OPENROUTER_API_KEY" > /etc/leonardo/server.env'
 sudo chown root:"$SERVER_USER" /etc/leonardo/server.env
 sudo chmod 0640 /etc/leonardo/server.env
 

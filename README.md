@@ -26,7 +26,7 @@ cd leonardo_v1
 pip install -e .
 
 # Set your OpenRouter API key
-export OPENROUTER_API_KEY="sk-or-..."
+export LEO_OPENROUTER_API_KEY="sk-or-..."
 ```
 
 ## Usage

@@ -21,7 +21,7 @@ export CLIENT_USER="leonardo-client"
 export APP_DIR="/opt/leonardo_v1"
 export REPO_URL="https://github.com/andi-zehan/voice-assistent.git"
 export REPO_REF="main"
-export OPENROUTER_API_KEY="REPLACE_ME"
+export LEO_OPENROUTER_API_KEY="REPLACE_ME"
 export SERVER_PORT="8765"
 export PIPER_EN_VOICE="en_GB-jenny_dioco-medium"
 export PIPER_DE_VOICE="de_DE-thorsten-medium"
@@ -35,7 +35,7 @@ Hard fail if any required variable is missing:
 
 ```bash
 set -euo pipefail
-for v in SERVER_HOSTNAME SERVER_IP SERVER_USER CLIENT_HOSTNAME CLIENT_IP CLIENT_USER APP_DIR REPO_URL REPO_REF OPENROUTER_API_KEY SERVER_PORT PIPER_EN_VOICE PIPER_DE_VOICE PIPER_EN_ONNX_URL PIPER_EN_JSON_URL PIPER_DE_ONNX_URL PIPER_DE_JSON_URL; do
+for v in SERVER_HOSTNAME SERVER_IP SERVER_USER CLIENT_HOSTNAME CLIENT_IP CLIENT_USER APP_DIR REPO_URL REPO_REF LEO_OPENROUTER_API_KEY SERVER_PORT PIPER_EN_VOICE PIPER_DE_VOICE PIPER_EN_ONNX_URL PIPER_EN_JSON_URL PIPER_DE_ONNX_URL PIPER_DE_JSON_URL; do
   test -n "${!v:-}" || { echo "Missing env var: $v" >&2; exit 1; }
 done
 ```
@@ -211,7 +211,7 @@ Expected result: `server/config.yaml` exists and is valid YAML.
 ```bash
 set -euo pipefail
 sudo install -d -m 0750 -o root -g "$SERVER_USER" /etc/leonardo
-sudo OPENROUTER_API_KEY="$OPENROUTER_API_KEY" bash -c 'umask 027; printf "OPENROUTER_API_KEY=%s\n" "$OPENROUTER_API_KEY" > /etc/leonardo/server.env'
+sudo LEO_OPENROUTER_API_KEY="$LEO_OPENROUTER_API_KEY" bash -c 'umask 027; printf "LEO_OPENROUTER_API_KEY=%s\n" "$LEO_OPENROUTER_API_KEY" > /etc/leonardo/server.env'
 sudo chown root:"$SERVER_USER" /etc/leonardo/server.env
 sudo chmod 0640 /etc/leonardo/server.env
 ```

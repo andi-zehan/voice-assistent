@@ -31,9 +31,9 @@ class OpenRouterClient:
             retry_base_delay_s = 0.25
         self._retry_base_delay_s = max(0.05, retry_base_delay_s)
 
-        self._api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        self._api_key = os.environ.get("LEO_OPENROUTER_API_KEY", "")
         if not self._api_key:
-            print("\033[31mWARNING: OPENROUTER_API_KEY not set\033[0m")
+            print("\033[31mWARNING: LEO_OPENROUTER_API_KEY not set\033[0m")
 
     def _headers(self) -> dict:
         return {

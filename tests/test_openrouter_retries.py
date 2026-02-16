@@ -28,7 +28,7 @@ class FakeResponse:
 
 
 def _client() -> OpenRouterClient:
-    os.environ["OPENROUTER_API_KEY"] = "test-key"
+    os.environ["LEO_OPENROUTER_API_KEY"] = "test-key"
     return OpenRouterClient(
         {
             "model": "openai/gpt-5-chat",
