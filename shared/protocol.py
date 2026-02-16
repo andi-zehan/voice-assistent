@@ -59,7 +59,7 @@ def decode_audio(data: bytes) -> np.ndarray:
 # ── Message constructors (client → server) ──────────────────────────
 
 def make_wake(score: float) -> str:
-    return encode_json({"type": WAKE, "score": round(score, 3)})
+    return encode_json({"type": WAKE, "score": round(float(score), 3)})
 
 
 def make_utterance_meta(sample_rate: int, num_samples: int) -> str:
