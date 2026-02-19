@@ -28,7 +28,7 @@ tts:
   sentence_silence: 0.2
   voices:
     en:
-      piper_voice: "en_GB-southern_english_female-low"
+      piper_voice: "en_US-amy-medium"
     de:
       piper_voice: "de_DE-thorsten-medium"
   # Piper tuning params (used only when engine=piper or for DE fallback)
