@@ -19,7 +19,7 @@ from server.stt.whisper_stt import WhisperSTT
 from server.stt.filters import check_hallucination
 from server.llm.openrouter_client import OpenRouterClient
 from server.llm.prompt import get_system_prompt, build_messages, clean_for_tts
-from server.tts.piper_tts import PiperTTS
+from server.tts import TTSEngine
 from server.assistant.session import Session
 from server.assistant.metrics import MetricsLogger
 from server.assistant.language import detect_response_language
@@ -47,7 +47,7 @@ class SessionHandler:
         ws: WebSocket,
         stt: WhisperSTT,
         llm: OpenRouterClient,
-        tts: PiperTTS,
+        tts: TTSEngine,
         session: Session,
         metrics: MetricsLogger,
         config: dict,

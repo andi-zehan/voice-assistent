@@ -16,6 +16,8 @@ PIPER_EN_ONNX_URL="${PIPER_EN_ONNX_URL:-https://huggingface.co/rhasspy/piper-voi
 PIPER_EN_JSON_URL="${PIPER_EN_JSON_URL:-https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/jenny_dioco/medium/en_GB-jenny_dioco-medium.onnx.json}"
 PIPER_DE_ONNX_URL="${PIPER_DE_ONNX_URL:-https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx}"
 PIPER_DE_JSON_URL="${PIPER_DE_JSON_URL:-https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/de/de_DE/thorsten/medium/de_DE-thorsten-medium.onnx.json}"
+TTS_ENGINE="${TTS_ENGINE:-piper}"
+KOKORO_EN_VOICE="${KOKORO_EN_VOICE:-af_bella}"
 ENABLE_UFW_RULE="${ENABLE_UFW_RULE:-false}"
 
 require_env() {
@@ -44,7 +46,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   git curl ca-certificates build-essential \
   python3 python3-venv python3-pip \
-  ffmpeg libsndfile1 netcat-openbsd
+  ffmpeg libsndfile1 netcat-openbsd \
+  espeak-ng
 
 echo "[server] creating service user and app dir"
 if ! id -u "$SERVER_USER" >/dev/null 2>&1; then
@@ -88,6 +91,8 @@ sudo cp -an "$APP_DIR/server/config.yaml" "$APP_DIR/server/config.yaml.bak.prede
 run_as_server_user env \
   APP_DIR="$APP_DIR" \
   SERVER_PORT="$SERVER_PORT" \
+  TTS_ENGINE="$TTS_ENGINE" \
+  KOKORO_EN_VOICE="$KOKORO_EN_VOICE" \
   PIPER_EN_VOICE="$PIPER_EN_VOICE" \
   PIPER_DE_VOICE="$PIPER_DE_VOICE" \
   "$APP_DIR/.venv/bin/python" - <<'PY'
@@ -103,13 +108,20 @@ cfg["server"]["host"] = "0.0.0.0"
 cfg["server"]["port"] = int(os.environ["SERVER_PORT"])
 
 cfg.setdefault("tts", {})
-cfg["tts"]["engine"] = "piper"
+cfg["tts"]["engine"] = os.environ.get("TTS_ENGINE", "piper")
 cfg["tts"]["model_dir"] = "models/piper"
 cfg["tts"]["default_language"] = "en"
-cfg["tts"]["voices"] = {
-    "en": {"piper_voice": os.environ["PIPER_EN_VOICE"]},
-    "de": {"piper_voice": os.environ["PIPER_DE_VOICE"]},
-}
+if os.environ.get("TTS_ENGINE") == "kokoro":
+    cfg["tts"]["speed"] = 1.0
+    cfg["tts"]["voices"] = {
+        "en": {"kokoro_voice": os.environ["KOKORO_EN_VOICE"]},
+        "de": {"piper_voice": os.environ["PIPER_DE_VOICE"]},
+    }
+else:
+    cfg["tts"]["voices"] = {
+        "en": {"piper_voice": os.environ["PIPER_EN_VOICE"]},
+        "de": {"piper_voice": os.environ["PIPER_DE_VOICE"]},
+    }
 
 cfg.setdefault("protocol", {})
 cfg["protocol"]["audio_mismatch_reject_ratio"] = 0.2

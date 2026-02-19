@@ -1,10 +1,13 @@
-"""TTS engine abstraction — Piper only (server is Linux)."""
+"""TTS engine abstraction — Piper and Kokoro supported."""
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Generator, Protocol, runtime_checkable
 
 import numpy as np
+
+if TYPE_CHECKING:
+    pass
 
 
 @runtime_checkable
@@ -18,9 +21,23 @@ class TTSEngine(Protocol):
         """
         ...
 
+    def synthesize_chunks(
+        self, text: str, language: str | None = None
+    ) -> "Generator[tuple[np.ndarray, int, bool], None, None]":
+        """Yield per-sentence audio chunks for streaming.
+
+        Yields ``(audio_int16, sample_rate, is_last)`` tuples.
+        """
+        ...
+
 
 def create_tts(tts_config: dict) -> TTSEngine:
-    """Instantiate the Piper TTS engine."""
-    from server.tts.piper_tts import PiperTTS
-
-    return PiperTTS(tts_config)
+    """Instantiate the configured TTS engine (Piper or Kokoro)."""
+    engine = tts_config.get("engine", "piper")
+    if engine == "kokoro":
+        from server.tts.kokoro_tts import KokoroTTS
+        return KokoroTTS(tts_config)
+    elif engine == "piper":
+        from server.tts.piper_tts import PiperTTS
+        return PiperTTS(tts_config)
+    raise ValueError(f"Unknown TTS engine '{engine}'. Supported: 'piper', 'kokoro'.")
