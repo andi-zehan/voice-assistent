@@ -21,16 +21,16 @@ llm:
   retry_base_delay_s: 0.25
 
 tts:
-  engine: "kokoro"
-  model_dir: "models/piper"      # still needed for Piper DE fallback
+  engine: "piper"
+  model_dir: "models/piper"
   default_language: "en"
   speed: 1.0                     # Kokoro-only; ignored by Piper
   sentence_silence: 0.2
   voices:
     en:
-      kokoro_voice: "af_bella"
+      piper_voice: "en_GB-southern_english_female-low"
     de:
-      piper_voice: "de_DE-thorsten-medium"   # Piper fallback (Kokoro has no German)
+      piper_voice: "de_DE-thorsten-medium"
   # Piper tuning params (used only when engine=piper or for DE fallback)
   length_scale: 1.1
   noise_scale: 0.85
