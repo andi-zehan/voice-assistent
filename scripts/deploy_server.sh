@@ -42,7 +42,8 @@ if [[ "$(hostname)" != "$SERVER_HOSTNAME" ]]; then
 fi
 
 echo "[server] installing prerequisites"
-sudo DEBIAN_FRONTEND=noninteractive apt-get update -y
+sudo DEBIAN_FRONTEND=noninteractive apt-get update -y 2>/dev/null || \
+  echo "[server] warning: apt-get update had errors (non-fatal, continuing)"
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   git curl ca-certificates build-essential \
   python3 python3-venv python3-pip \

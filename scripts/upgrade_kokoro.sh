@@ -64,7 +64,9 @@ echo "[3/6] Installing espeak-ng (Kokoro phonemizer)..."
 if command -v espeak-ng >/dev/null 2>&1; then
   echo "      Already installed: $(espeak-ng --version 2>&1 | head -1)"
 else
-  sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -qq
+  # apt-get update may fail due to unrelated broken repos — try install anyway
+  sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -qq 2>/dev/null || \
+    echo "      Warning: apt-get update had errors (non-fatal, continuing)"
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq espeak-ng
   echo "      Installed."
 fi
