@@ -1,11 +1,21 @@
 """Microphone capture using sounddevice with callback-based streaming."""
 
+import logging
 import queue
 import threading
+import time
+
 import numpy as np
 import sounddevice as sd
 
 from client.audio.ring_buffer import RingBuffer
+
+log = logging.getLogger(__name__)
+
+# How many consecutive get_frame timeouts before we consider the stream dead
+_STALE_TIMEOUT_S = 2.0
+# Delay between reconnection attempts
+_RECONNECT_DELAY_S = 1.0
 
 
 class AudioCapture:
@@ -13,6 +23,9 @@ class AudioCapture:
 
     The sounddevice callback converts float32 input to int16, writes to a ring
     buffer, and pushes frames onto a queue for the main loop to consume.
+
+    Automatically restarts the stream when the audio device disappears
+    (e.g. USB unplug/replug).
     """
 
     def __init__(self, audio_config: dict):
@@ -28,10 +41,19 @@ class AudioCapture:
         )
         self.frame_queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=200)
         self._stream: sd.InputStream | None = None
+        self._last_callback_time: float = 0.0
+        self._stream_error: bool = False
 
     def _callback(self, indata: np.ndarray, frames: int, time_info, status):
         if status:
-            pass  # Silently ignore xruns to avoid log spam
+            if status.input_overflow:
+                pass  # xruns are normal, ignore
+            else:
+                # Device error (e.g. unplugged) — flag for restart
+                log.warning("Audio stream error: %s", status)
+                self._stream_error = True
+                return
+        self._last_callback_time = time.monotonic()
         mono = indata[:, 0] if indata.shape[1] > 1 else indata.ravel()
         mono_clipped = np.clip(mono, -1.0, 1.0)
         int16_data = (mono_clipped * 32767).astype(np.int16)
@@ -41,9 +63,23 @@ class AudioCapture:
         except queue.Full:
             with self._dropped_lock:
                 self._dropped_frames += 1
-            pass
 
     def start(self) -> None:
+        self._open_stream()
+
+    def _open_stream(self) -> None:
+        """Open a new InputStream. Safe to call after a previous stream died."""
+        # Clean up any existing stream
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+
+        self._stream_error = False
+        self._last_callback_time = time.monotonic()
         self._stream = sd.InputStream(
             samplerate=self._sample_rate,
             channels=self._channels,
@@ -52,6 +88,28 @@ class AudioCapture:
             callback=self._callback,
         )
         self._stream.start()
+
+    def restart(self) -> bool:
+        """Attempt to restart the audio stream. Returns True on success."""
+        try:
+            self._open_stream()
+            log.info("Audio stream restarted successfully")
+            return True
+        except Exception as e:
+            log.warning("Failed to restart audio stream: %s", e)
+            self._stream = None
+            return False
+
+    @property
+    def is_healthy(self) -> bool:
+        """True if the stream is active and receiving callbacks."""
+        if self._stream_error:
+            return False
+        if self._stream is None or not self._stream.active:
+            return False
+        if self._last_callback_time and time.monotonic() - self._last_callback_time > _STALE_TIMEOUT_S:
+            return False
+        return True
 
     def stop(self) -> None:
         if self._stream is not None:

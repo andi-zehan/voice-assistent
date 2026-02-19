@@ -10,6 +10,7 @@ States: PASSIVE -> LISTENING -> WAITING -> SPEAKING -> FOLLOW_UP
 import enum
 import logging
 import time
+import traceback
 
 import numpy as np
 
@@ -94,6 +95,10 @@ class ClientStateMachine:
         self._capture_drop_report_s = config["audio"].get("capture_drop_report_s", 5.0)
         self._last_capture_drop_report_s = time.monotonic()
 
+        # Audio device reconnection
+        self._reconnect_delay_s = 1.0
+        self._last_reconnect_attempt = 0.0
+
         # Follow-up window
         self._follow_up_window_s = config["conversation"].get("follow_up_window_s", 7.0)
 
@@ -122,6 +127,10 @@ class ClientStateMachine:
             # Report capture drops periodically
             if now - self._last_capture_drop_report_s >= self._capture_drop_report_s:
                 self._report_capture_drops(now)
+
+            # Check audio device health and reconnect if needed
+            if not self._capture.is_healthy:
+                self._try_reconnect_audio(now)
 
             # Check for incoming server messages (non-blocking)
             self._process_server_messages()
@@ -153,6 +162,23 @@ class ClientStateMachine:
         if dropped <= 0:
             return
         print(f"  {_YELLOW}Audio capture dropped {dropped} frame(s){_RST}")
+
+    def _try_reconnect_audio(self, now: float) -> None:
+        """Attempt to restart the audio stream after device loss."""
+        if now - self._last_reconnect_attempt < self._reconnect_delay_s:
+            return
+        self._last_reconnect_attempt = now
+        print(f"  {_YELLOW}Audio device lost — attempting reconnect...{_RST}")
+
+        # Return to PASSIVE during reconnection
+        if self._state != State.PASSIVE:
+            self._transition(State.PASSIVE)
+
+        if self._capture.restart():
+            print(f"  {_CYAN}Audio device reconnected{_RST}")
+            print(f"  {_DIM}State: [{self._state.value}] -- say the wake word...{_RST}")
+        else:
+            print(f"  {_RED}Reconnect failed — will retry in {self._reconnect_delay_s}s{_RST}")
 
     # ── Server message processing ───────────────────────────────
 
